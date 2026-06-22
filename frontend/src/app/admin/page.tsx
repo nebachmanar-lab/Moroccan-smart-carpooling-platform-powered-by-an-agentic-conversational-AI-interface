@@ -37,7 +37,13 @@ interface AdminRating {
     stars: number; comment: string | null; created_at: string;
 }
 
-type Tab = "stats" | "users" | "rides" | "documents" | "ratings";
+type Tab = "stats" | "users" | "rides" | "documents" | "ratings" | "reports";
+
+interface AdminReport {
+    id: string; reporter_id: string | null; reporter_name: string;
+    target_type: string; target_id: string; reason: string;
+    status: string; admin_note: string | null; created_at: string;
+}
 
 export default function AdminPage() {
     const router = useRouter();
@@ -48,6 +54,7 @@ export default function AdminPage() {
     const [rides, setRides] = useState<AdminRide[]>([]);
     const [docs, setDocs] = useState<AdminDoc[]>([]);
     const [ratings, setRatings] = useState<AdminRating[]>([]);
+    const [reports, setReports] = useState<AdminReport[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [reviewNote, setReviewNote] = useState<Record<string, string>>({});
@@ -64,7 +71,8 @@ export default function AdminPage() {
         if (tab === "rides"     && rides.length === 0)   apiFetch("/admin/rides").then((r) => r.ok ? r.json() : []).then(setRides);
         if (tab === "documents" && docs.length === 0)    apiFetch("/documents/admin/all").then((r) => r.ok ? r.json() : []).then(setDocs);
         if (tab === "ratings"   && ratings.length === 0) apiFetch("/ratings/admin/all").then((r) => r.ok ? r.json() : []).then(setRatings);
-    }, [tab, users.length, rides.length, docs.length, ratings.length]);
+        if (tab === "reports"   && reports.length === 0) apiFetch("/admin/reports").then((r) => r.ok ? r.json() : []).then(setReports);
+    }, [tab, users.length, rides.length, docs.length, ratings.length, reports.length]);
 
     async function changeRole(userId: string, newRole: string) {
         await apiFetch(`/admin/users/${userId}/role`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: newRole }) });
@@ -81,6 +89,18 @@ export default function AdminPage() {
         if (!confirm("Annuler ce trajet ?")) return;
         const res = await apiFetch(`/admin/rides/${rideId}`, { method: "DELETE" });
         if (res.ok) setRides((prev) => prev.map((r) => r.id === rideId ? { ...r, status: "CANCELLED" } : r));
+    }
+
+    async function resolveReport(reportId: string, status: "RESOLVED" | "DISMISSED") {
+        const note = status === "RESOLVED" ? prompt("Note admin (optionnel) :") ?? undefined : undefined;
+        const res = await apiFetch(`/admin/reports/${reportId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status, admin_note: note || null }),
+        });
+        if (res.ok) {
+            setReports((prev) => prev.map((r) => r.id === reportId ? { ...r, status } : r));
+        }
     }
 
     async function reviewDoc(docId: string, status: "APPROVED" | "REJECTED") {
@@ -104,6 +124,7 @@ export default function AdminPage() {
         { id: "rides",     label: "Trajets" },
         { id: "documents", label: "Documents", badge: stats?.documents.pending },
         { id: "ratings",   label: "Avis" },
+        { id: "reports",   label: "Signalements", badge: reports.filter((r) => r.status === "PENDING").length || undefined },
     ];
 
     return (
@@ -240,6 +261,51 @@ export default function AdminPage() {
                                                         />
                                                         <button className="btn-accept-booking" onClick={() => reviewDoc(d.id, "APPROVED")}>Valider</button>
                                                         <button className="btn-cancel-booking" onClick={() => reviewDoc(d.id, "REJECTED")}>Rejeter</button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+                    )}
+
+                    {/* Reports (ADM-01) */}
+                    {tab === "reports" && (
+                        <section className="glass-card section-card">
+                            <div className="section-header">
+                                <h2>Signalements ({reports.filter((r) => r.status === "PENDING").length} en attente)</h2>
+                            </div>
+                            {reports.length === 0 ? (
+                                <p className="dash-empty">Aucun signalement pour le moment.</p>
+                            ) : (
+                                <div className="admin-doc-list">
+                                    {reports.map((r) => (
+                                        <div key={r.id} className="admin-doc-row">
+                                            <div style={{ flex: 1 }}>
+                                                <p style={{ fontWeight: 600, margin: "0 0 4px" }}>
+                                                    <span style={{ textTransform: "uppercase", fontSize: 11, padding: "2px 6px", borderRadius: 4, background: r.target_type === "ride" ? "#1A56DB22" : "#dc262622", color: r.target_type === "ride" ? "#1A56DB" : "#dc2626", marginRight: 8 }}>
+                                                        {r.target_type}
+                                                    </span>
+                                                    {r.reason}
+                                                </p>
+                                                <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+                                                    Signalé par <strong>{r.reporter_name}</strong> · {new Date(r.created_at).toLocaleDateString("fr-MA")}
+                                                    {r.target_type === "ride" && (
+                                                        <> · <a href={`/rides/${r.target_id}`} target="_blank" rel="noopener noreferrer" style={{ color: "var(--blue)" }}>Voir le trajet</a></>
+                                                    )}
+                                                </p>
+                                                {r.admin_note && <p style={{ fontSize: 12, color: "#22c55e", margin: "4px 0 0" }}>Note : {r.admin_note}</p>}
+                                            </div>
+                                            <div className="admin-doc-actions">
+                                                <span className={`booking-badge ${r.status === "RESOLVED" ? "confirmed" : r.status === "DISMISSED" ? "cancelled" : "pending-badge-inline"}`}>
+                                                    {r.status === "RESOLVED" ? "Résolu" : r.status === "DISMISSED" ? "Ignoré" : "En attente"}
+                                                </span>
+                                                {r.status === "PENDING" && (
+                                                    <>
+                                                        <button className="btn-accept-booking" onClick={() => resolveReport(r.id, "RESOLVED")}>Résoudre</button>
+                                                        <button className="btn-cancel-booking" onClick={() => resolveReport(r.id, "DISMISSED")}>Ignorer</button>
                                                     </>
                                                 )}
                                             </div>

@@ -23,6 +23,7 @@ from app.routes import documents
 from app.routes import messages
 from app.routes import tourist
 from app.routes import alerts
+from app.routes import reports
 app = FastAPI(title="Covoiturage Maroc API", version="1.0.0")
 
 app.add_middleware(
@@ -65,6 +66,7 @@ app.include_router(documents.router)
 app.include_router(messages.router)
 app.include_router(tourist.router)
 app.include_router(alerts.router)
+app.include_router(reports.router)
 
 # Serve uploaded files
 _uploads_dir = os.path.join(os.path.dirname(__file__), "..", "uploads")

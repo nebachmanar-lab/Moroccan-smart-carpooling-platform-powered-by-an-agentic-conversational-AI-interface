@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from app.services.email import send_ride_cancelled_email
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
@@ -111,13 +112,64 @@ async def create_ride(
     _fill_coordinates(ride_in.destination, "destination_lat", "destination_lng", ride_data)
     ride = Ride(**ride_data, driver_id=current_user.id)
     db.add(ride)
+
+    # Auto-generate future occurrences for recurring rides (C-08)
+    if ride_in.is_recurring and ride_in.recurrence_days and ride_in.recurrence_end_date:
+        from datetime import timedelta
+        base = ride_in.departure_time
+        end = ride_in.recurrence_end_date
+        current_date = base + timedelta(days=1)
+        while current_date <= end:
+            if current_date.weekday() in ride_in.recurrence_days:
+                future_data = {**ride_data, "departure_time": current_date, "is_recurring": True}
+                db.add(Ride(**future_data, driver_id=current_user.id))
+            current_date += timedelta(days=1)
+
     await db.commit()
     background_tasks.add_task(
         _notify_alert_users,
         str(ride.id), ride.origin, ride.destination,
         ride.departure_time, ride.available_seats, ride.price_per_seat,
     )
+    background_tasks.add_task(
+        _check_price_anomaly,
+        str(ride.id), ride.origin, ride.destination, ride.price_per_seat,
+    )
     return ride
+
+
+async def _check_price_anomaly(ride_id: str, origin: str, destination: str, price: float) -> None:
+    """Auto-flag rides with suspicious prices vs route average (IA-06 / ADM-04)."""
+    import uuid as _uuid
+    from app.models.report import Report
+    from app.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(func.avg(Ride.price_per_seat), func.count(Ride.id))
+            .where(
+                Ride.origin.ilike(f"%{origin}%"),
+                Ride.destination.ilike(f"%{destination}%"),
+                Ride.id != ride_id,
+                Ride.status != RideStatus.CANCELLED,
+            )
+        )
+        row = result.one()
+        avg_price = float(row[0]) if row[0] else None
+        count = int(row[1])
+        if avg_price and count >= 3:
+            ratio = price / avg_price
+            if ratio > 3.0 or ratio < 0.2:
+                direction = "trop élevé" if ratio > 3.0 else "anormalement bas"
+                report = Report(
+                    id=str(_uuid.uuid4()),
+                    reporter_id=None,
+                    target_type="ride",
+                    target_id=ride_id,
+                    reason=f"Prix {direction} automatiquement détecté : {price:.0f} MAD vs moyenne {avg_price:.0f} MAD sur {origin} → {destination} ({count} trajets)",
+                    status="PENDING",
+                )
+                db.add(report)
+                await db.commit()
 
 
 # ── Search ────────────────────────────────────────────────────────────────────
@@ -345,6 +397,7 @@ async def get_revenue_summary(
 @router.delete("/{ride_id}")
 async def cancel_my_ride(
     ride_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -357,6 +410,32 @@ async def cancel_my_ride(
     if ride.status == RideStatus.CANCELLED:
         raise HTTPException(status_code=400, detail="Déjà annulé")
 
+    # Load all active bookings to notify passengers (C-06)
+    bookings_res = await db.execute(
+        select(Booking)
+        .options(joinedload(Booking.passenger))
+        .where(
+            Booking.ride_id == ride_id,
+            Booking.status.in_([BookingStatus.PENDING, BookingStatus.CONFIRMED]),
+        )
+    )
+    active_bookings = bookings_res.scalars().unique().all()
+
     ride.status = RideStatus.CANCELLED
     await db.commit()
+
+    driver_name = f"{current_user.first_name} {current_user.last_name}".strip()
+    for b in active_bookings:
+        if b.passenger and b.passenger.email:
+            passenger_name = f"{b.passenger.first_name} {b.passenger.last_name}".strip()
+            background_tasks.add_task(
+                send_ride_cancelled_email,
+                to_email=b.passenger.email,
+                passenger_name=passenger_name,
+                driver_name=driver_name,
+                origin=ride.origin,
+                destination=ride.destination,
+                departure=ride.departure_time,
+            )
+
     return {"cancelled": ride_id}

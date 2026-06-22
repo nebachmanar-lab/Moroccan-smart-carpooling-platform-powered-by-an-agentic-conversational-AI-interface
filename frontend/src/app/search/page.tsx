@@ -143,7 +143,18 @@ function SearchContent() {
                             <button type="submit" className="btn btn-primary" disabled={loading || !origin || !destination} style={{ flex: 1 }}>
                                 {loading ? "Recherche..." : "Rechercher"}
                             </button>
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => router.push("/agent")} style={{ whiteSpace: "nowrap" }}>
+                            <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{ whiteSpace: "nowrap" }}
+                                onClick={() => {
+                                    const params = new URLSearchParams();
+                                    if (origin) params.set("origin", origin);
+                                    if (destination) params.set("destination", destination);
+                                    if (date) params.set("date", date);
+                                    router.push(`/agent?${params.toString()}`);
+                                }}
+                            >
                                 Essayer le mode IA
                             </button>
                         </div>

@@ -3,14 +3,13 @@ Real-time GPS tracking via WebSocket.
 
 Flow:
   Driver  → connects as role=driver  → sends {lat, lng, speed?, heading?}
-  Passenger → connects as role=watcher → receives driver location broadcasts
-
-Room model (in-memory, per ride):
-  _rooms[ride_id] = { "driver": WebSocket | None, "watchers": [WebSocket, ...], "last": {lat,lng,...} }
+  Watcher → connects as role=watcher → receives driver location broadcasts
+            Can auth with JWT token OR a share_token (no account required) — C-09
 """
 import json
 import logging
-from typing import Any
+import secrets
+from typing import Any, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +19,9 @@ from fastapi import Depends
 from ..database import get_db
 from ..models.ride import Ride, RideStatus
 from ..middleware.auth import get_current_user_ws
+
+# In-memory share tokens: { token: ride_id }
+_share_tokens: dict[str, str] = {}
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["tracking"])
@@ -46,16 +48,42 @@ async def _broadcast(ride_id: str, payload: dict) -> None:
         room["watchers"].remove(ws)
 
 
+@router.get("/rides/{ride_id}/tracking/share-link")
+async def get_tracking_share_link(
+    ride_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a share token that allows anyone to watch tracking without logging in (C-09)."""
+    result = await db.execute(select(Ride).where(Ride.id == ride_id))
+    ride = result.scalar_one_or_none()
+    if not ride:
+        raise HTTPException(status_code=404, detail="Trajet introuvable")
+    # Reuse existing token for this ride if one exists, else create new
+    existing = next((t for t, rid in _share_tokens.items() if rid == ride_id), None)
+    token = existing or secrets.token_urlsafe(16)
+    _share_tokens[token] = ride_id
+    return {"ride_id": ride_id, "share_token": token}
+
+
 @router.websocket("/ws/tracking/{ride_id}")
 async def tracking_ws(
     websocket: WebSocket,
     ride_id: str,
     role: str = Query("watcher", description="'driver' or 'watcher'"),
-    token: str = Query(..., description="JWT access token"),
+    token: Optional[str] = Query(None, description="JWT access token"),
+    share_token: Optional[str] = Query(None, description="Public share token (no login required)"),
     db: AsyncSession = Depends(get_db),
 ):
-    # Authenticate
-    user = await get_current_user_ws(token, db)
+    # Authenticate: JWT required for drivers, share_token allows public watchers (C-09)
+    user = None
+    if token:
+        user = await get_current_user_ws(token, db)
+    elif share_token and role == "watcher":
+        if _share_tokens.get(share_token) != ride_id:
+            await websocket.close(code=4001, reason="Invalid share token")
+            return
+        user = True  # sentinel — public watcher authenticated via share token
+
     if not user:
         await websocket.close(code=4001, reason="Unauthorized")
         return
@@ -71,7 +99,7 @@ async def tracking_ws(
     room = _room(ride_id)
 
     if role == "driver":
-        if ride.driver_id != user.id:
+        if user is True or ride.driver_id != user.id:
             await websocket.close(code=4003, reason="Not the driver of this ride")
             return
         room["driver"] = websocket
@@ -101,9 +129,10 @@ async def tracking_ws(
             await _broadcast(ride_id, {"type": "driver_disconnected", "ride_id": ride_id})
             logger.info(f"Driver disconnected from ride {ride_id}")
 
-    else:  # watcher (passenger or anyone with the ride link)
+    else:  # watcher (passenger or public via share token)
         room["watchers"].append(websocket)
-        logger.info(f"Watcher {user.id} joined ride {ride_id} ({len(room['watchers'])} total)")
+        watcher_id = "public" if user is True else getattr(user, "id", "unknown")
+        logger.info(f"Watcher {watcher_id} joined ride {ride_id} ({len(room['watchers'])} total)")
 
         # Send last known position immediately so they don't wait
         if room["last"]:
@@ -118,7 +147,8 @@ async def tracking_ws(
         except WebSocketDisconnect:
             if websocket in room["watchers"]:
                 room["watchers"].remove(websocket)
-            logger.info(f"Watcher {user.id} left ride {ride_id}")
+            watcher_id = "public" if user is True else getattr(user, "id", "unknown")
+            logger.info(f"Watcher {watcher_id} left ride {ride_id}")
 
 
 @router.get("/rides/{ride_id}/tracking/status")

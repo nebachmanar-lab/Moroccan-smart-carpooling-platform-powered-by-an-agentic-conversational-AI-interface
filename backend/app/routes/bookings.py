@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -11,6 +11,7 @@ from app.services.email import (
     send_booking_accepted_email,
     send_booking_refused_email,
     send_receipt_email,
+    send_passenger_cancelled_email,
 )
 import uuid as _uuid
 from app.services.sms import send_booking_confirmation_sms, send_booking_cancellation_sms
@@ -288,7 +289,16 @@ async def cancel(
     db:               AsyncSession = Depends(get_db),
     current_user:     User         = Depends(get_current_user),
 ):
+    # Load the booking with ride+driver before cancelling so we can notify the driver (C-07)
+    pre_result = await db.execute(
+        select(Booking)
+        .options(joinedload(Booking.ride).joinedload(Ride.driver))
+        .where(Booking.id == booking_id, Booking.passenger_id == current_user.id)
+    )
+    pre_booking = pre_result.scalar_one_or_none()
+
     booking = await cancel_booking(db, booking_id, current_user.id)
+
     if current_user.phone and booking.ride:
         background_tasks.add_task(
             send_booking_cancellation_sms,
@@ -298,6 +308,24 @@ async def cancel(
             departure  = booking.ride.departure_time,
             by_driver  = False,
         )
+
+    # Notify driver that a passenger cancelled (C-07)
+    if pre_booking and pre_booking.ride and pre_booking.ride.driver:
+        driver = pre_booking.ride.driver
+        if driver.email:
+            passenger_name = f"{current_user.first_name} {current_user.last_name}".strip()
+            driver_name = f"{driver.first_name} {driver.last_name}".strip()
+            background_tasks.add_task(
+                send_passenger_cancelled_email,
+                to_email=driver.email,
+                driver_name=driver_name,
+                passenger_name=passenger_name,
+                origin=pre_booking.ride.origin,
+                destination=pre_booking.ride.destination,
+                departure=pre_booking.ride.departure_time,
+                seats=pre_booking.seats_booked,
+            )
+
     return BookingCancelResponse(
         booking_id = booking.id,
         status     = booking.status,

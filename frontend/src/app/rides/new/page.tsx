@@ -19,6 +19,12 @@ export default function NewRidePage() {
     const [dropoffLocation, setDropoffLocation] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    // Recurring ride state (C-08)
+    const [isRecurring, setIsRecurring] = useState(false);
+    const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
+    const [recurrenceEndDate, setRecurrenceEndDate] = useState("");
+
+    const DAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
     useEffect(() => {
         fetchCities()
@@ -36,7 +42,7 @@ export default function NewRidePage() {
         setLoading(true);
         setError("");
 
-        const body: Record<string, string | number> = {
+        const body: Record<string, unknown> = {
             origin: origin.name,
             destination: destination.name,
             origin_lat: origin.lat,
@@ -46,9 +52,14 @@ export default function NewRidePage() {
             departure_time: new Date(departureTime).toISOString(),
             available_seats: seats,
             price_per_seat: price,
+            is_recurring: isRecurring,
         };
         if (pickupLocation.trim())  body.pickup_location  = pickupLocation.trim();
         if (dropoffLocation.trim()) body.dropoff_location = dropoffLocation.trim();
+        if (isRecurring && recurrenceDays.length > 0) {
+            body.recurrence_days = recurrenceDays;
+            if (recurrenceEndDate) body.recurrence_end_date = new Date(recurrenceEndDate).toISOString();
+        }
 
         try {
             const res = await apiFetch("/rides/", {
@@ -164,6 +175,54 @@ export default function NewRidePage() {
                             </div>
                         </div>
 
+                        {/* Recurring ride (C-08) */}
+                        <div className="inner-field">
+                            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                                <input
+                                    type="checkbox"
+                                    checked={isRecurring}
+                                    onChange={(e) => setIsRecurring(e.target.checked)}
+                                />
+                                <span>Trajet récurrent (se répète chaque semaine)</span>
+                            </label>
+                        </div>
+
+                        {isRecurring && (
+                            <>
+                                <div className="inner-field">
+                                    <label>Jours de répétition</label>
+                                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                                        {DAY_LABELS.map((label, i) => (
+                                            <button
+                                                key={i}
+                                                type="button"
+                                                onClick={() => setRecurrenceDays((prev) =>
+                                                    prev.includes(i) ? prev.filter((d) => d !== i) : [...prev, i]
+                                                )}
+                                                style={{
+                                                    padding: "6px 14px", borderRadius: 20, fontSize: 13, cursor: "pointer",
+                                                    background: recurrenceDays.includes(i) ? "var(--blue)" : "rgba(255,255,255,0.07)",
+                                                    color: recurrenceDays.includes(i) ? "#fff" : "var(--text-muted)",
+                                                    border: `1px solid ${recurrenceDays.includes(i) ? "var(--blue)" : "var(--border-soft)"}`,
+                                                }}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="inner-field">
+                                    <label htmlFor="recurrenceEnd">Répéter jusqu&apos;au</label>
+                                    <input
+                                        id="recurrenceEnd"
+                                        type="date"
+                                        value={recurrenceEndDate}
+                                        onChange={(e) => setRecurrenceEndDate(e.target.value)}
+                                    />
+                                </div>
+                            </>
+                        )}
+
                         {error && <p className="alert-error" style={{ marginBottom: "16px" }}>{error}</p>}
 
                         <button
@@ -171,7 +230,7 @@ export default function NewRidePage() {
                             disabled={loading}
                             className="btn btn-primary btn-full"
                         >
-                            {loading ? "Publication..." : "Publier le trajet"}
+                            {loading ? "Publication..." : isRecurring ? "Publier les trajets récurrents" : "Publier le trajet"}
                         </button>
                     </form>
                 </div>

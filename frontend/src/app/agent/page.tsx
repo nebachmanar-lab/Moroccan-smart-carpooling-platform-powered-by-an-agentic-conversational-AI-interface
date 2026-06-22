@@ -70,6 +70,30 @@ interface PaymentMethods {
 }
 
 // ---------------------------------------------------------------------------
+// Preference learning — persists searched routes in localStorage (IA-05)
+// ---------------------------------------------------------------------------
+function recordSearchedRoute(origin: string, destination: string) {
+    try {
+        const stored = localStorage.getItem("searched_routes");
+        const routes: { origin: string; destination: string; count: number }[] = stored ? JSON.parse(stored) : [];
+        const existing = routes.find((r) => r.origin === origin && r.destination === destination);
+        if (existing) { existing.count++; } else { routes.push({ origin, destination, count: 1 }); }
+        // Keep only top 10 by count
+        routes.sort((a, b) => b.count - a.count);
+        localStorage.setItem("searched_routes", JSON.stringify(routes.slice(0, 10)));
+    } catch { /* ignore */ }
+}
+
+function getLearnedSuggestions(): string[] {
+    try {
+        const stored = localStorage.getItem("searched_routes");
+        if (!stored) return [];
+        const routes: { origin: string; destination: string; count: number }[] = JSON.parse(stored);
+        return routes.slice(0, 2).map((r) => `Je cherche un trajet ${r.origin} → ${r.destination}`);
+    } catch { return []; }
+}
+
+// ---------------------------------------------------------------------------
 // Suggestions
 // ---------------------------------------------------------------------------
 const SUGGESTIONS_PASSENGER = [
@@ -111,11 +135,22 @@ export default function AgentPage() {
             if (!res.ok) { router.push("/login"); return; }
             const u: User = await res.json();
             setUser(u);
+
+            // MI-04: If coming from classic search with pre-filled state, auto-send search
+            const origin = searchParams.get("origin");
+            const destination = searchParams.get("destination");
+            const date = searchParams.get("date");
+            if (origin && destination && !searchParams.get("cid")) {
+                const parts = [`Je cherche un trajet ${origin} → ${destination}`];
+                if (date) parts.push(`le ${date}`);
+                setInput(parts.join(" "));
+            }
         }).catch(() => router.push("/login"));
 
         apiFetch("/ai/conversations").then(async (res) => {
             if (res.ok) setConversations(await res.json());
         });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [router]);
 
     // Load conversation from URL param
@@ -205,6 +240,11 @@ export default function AgentPage() {
             if (data.needs_confirmation && data.pending_action) {
                 setPendingAction(data.pending_action);
             }
+            // IA-05: learn route from results
+            if (data.ui_action === "show_rides" && Array.isArray(data.data?.rides)) {
+                const rides = data.data!.rides as { origin: string; destination: string }[];
+                if (rides.length > 0) recordSearchedRoute(rides[0].origin, rides[0].destination);
+            }
             // Refresh sidebar list to pick up auto-generated title
             apiFetch("/ai/conversations").then(async (r) => {
                 if (r.ok) setConversations(await r.json());
@@ -273,7 +313,10 @@ export default function AgentPage() {
     const showDetail = useCallback((id: string) => sendMessage(`Montre-moi les détails du trajet ${id}`), [sendMessage]);
 
     const showSuggestions = messages.length === 0 && !loading;
-    const suggestions = user?.role === "DRIVER" ? SUGGESTIONS_DRIVER : SUGGESTIONS_PASSENGER;
+    const learnedSuggestions = user?.role !== "DRIVER" ? getLearnedSuggestions() : [];
+    const suggestions = user?.role === "DRIVER"
+        ? SUGGESTIONS_DRIVER
+        : [...learnedSuggestions, ...SUGGESTIONS_PASSENGER].slice(0, 4);
 
     return (
         <main className="app-shell">
@@ -687,6 +730,13 @@ function TouristCard({ info }: { info: TouristInfo }) {
             {info.food && <TouristSection title="Où manger" items={info.food} />}
             {info.accommodation && <TouristSection title="Où dormir" items={info.accommodation} />}
             {info.tip && <div className="tourist-tip">{info.tip}</div>}
+            <Link
+                href={`/tourist?destination=${encodeURIComponent(info.destination)}`}
+                className="btn btn-secondary btn-sm"
+                style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+                Carte & POI · Mode Touriste →
+            </Link>
         </div>
     );
 }

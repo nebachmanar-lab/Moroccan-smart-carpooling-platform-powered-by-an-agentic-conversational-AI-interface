@@ -82,6 +82,40 @@ export default function RideDetailPage() {
     const [showPayment, setShowPayment] = useState(false);
     const [cancelling, setCancelling] = useState(false);
     const [error, setError] = useState("");
+    const [reporting, setReporting] = useState(false);
+    const [reportSent, setReportSent] = useState(false);
+    const [shareLink, setShareLink] = useState<string | null>(null);
+    const [copyDone, setCopyDone] = useState(false);
+
+    async function handleShareTracking() {
+        try {
+            const res = await apiFetch(`/rides/${id}/tracking/share-link`);
+            if (!res.ok) return;
+            const { share_token } = await res.json();
+            const url = `${window.location.origin}/track/${id}?token=${share_token}`;
+            setShareLink(url);
+            await navigator.clipboard.writeText(url);
+            setCopyDone(true);
+            setTimeout(() => setCopyDone(false), 3000);
+        } catch { /* ignore */ }
+    }
+
+    async function handleReport() {
+        if (!currentUser) { alert("Connectez-vous pour signaler un trajet."); return; }
+        const reason = prompt("Raison du signalement (prix suspect, contenu inapproprié, etc.) :");
+        if (!reason?.trim()) return;
+        setReporting(true);
+        try {
+            const res = await apiFetch("/reports", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ target_type: "ride", target_id: id, reason }),
+            });
+            if (res.ok || res.status === 409) setReportSent(true);
+        } finally {
+            setReporting(false);
+        }
+    }
 
     async function handleCancelBooking() {
         if (!myBooking || !confirm("Annuler votre réservation ?")) return;
@@ -280,13 +314,43 @@ export default function RideDetailPage() {
                         <span className="tourist-ride-banner-arrow">→</span>
                     </Link>
 
+                    {/* Report (ADM-01) */}
+                    {!isDriver && (
+                        <div style={{ marginTop: 8, textAlign: "right" }}>
+                            {reportSent ? (
+                                <span style={{ fontSize: 12, color: "#22c55e" }}>✓ Signalement envoyé — merci</span>
+                            ) : (
+                                <button
+                                    onClick={handleReport}
+                                    disabled={reporting}
+                                    style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 12, cursor: "pointer", textDecoration: "underline" }}
+                                >
+                                    {reporting ? "Envoi…" : "Signaler ce trajet"}
+                                </button>
+                            )}
+                        </div>
+                    )}
+
                     {/* Booking section */}
                     {isDriver ? (
-                        <div className="booking-status-banner driver">
-                            Vous êtes le conducteur de ce trajet.
-                            <Link href="/dashboard" style={{ marginLeft: 12, fontSize: "13px", color: "var(--blue)" }}>
-                                Gérer &rarr;
-                            </Link>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                            <div className="booking-status-banner driver">
+                                Vous êtes le conducteur de ce trajet.
+                                <Link href="/dashboard" style={{ marginLeft: 12, fontSize: "13px", color: "var(--blue)" }}>
+                                    Gérer &rarr;
+                                </Link>
+                            </div>
+                            {/* C-09: share GPS tracking link with family (no login needed) */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                <button onClick={handleShareTracking} className="btn btn-secondary btn-sm">
+                                    {copyDone ? "✓ Lien copié !" : "Partager le suivi GPS"}
+                                </button>
+                                {shareLink && (
+                                    <span style={{ fontSize: 12, color: "var(--text-muted)", wordBreak: "break-all" }}>
+                                        {shareLink}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     ) : myBooking ? (
                         <div className={`booking-status-banner ${myBooking.status === "CONFIRMED" ? "confirmed" : "pending"}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

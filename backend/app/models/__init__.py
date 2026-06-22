@@ -7,3 +7,4 @@ from app.models.rating import Rating
 from app.models.passenger_rating import PassengerRating
 from app.models.document import DriverDocument
 from app.models.message import DirectMessage
+from app.models.report import Report

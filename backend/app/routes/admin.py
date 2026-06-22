@@ -13,6 +13,7 @@ from app.models.ride import Ride, RideStatus
 from app.models.booking import Booking, BookingStatus
 from app.models.rating import Rating
 from app.models.document import DriverDocument, DocStatus
+from app.models.report import Report
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -197,3 +198,70 @@ async def cancel_ride(
     ride.status = RideStatus.CANCELLED
     await db.commit()
     return {"cancelled": ride_id}
+
+
+# ── Reports / Moderation (ADM-01) ─────────────────────────────────────────────
+
+class ReportItem(BaseModel):
+    id: str
+    reporter_id: Optional[str]
+    reporter_name: str
+    target_type: str
+    target_id: str
+    reason: str
+    status: str
+    admin_note: Optional[str]
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class ResolveReportRequest(BaseModel):
+    status: str   # "RESOLVED" | "DISMISSED"
+    admin_note: Optional[str] = None
+
+
+@router.get("/reports", response_model=list[ReportItem])
+async def list_reports(
+    status: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+):
+    query = select(Report).options(joinedload(Report.reporter)).order_by(Report.created_at.desc())
+    if status:
+        query = query.where(Report.status == status.upper())
+    result = await db.execute(query)
+    reports = result.unique().scalars().all()
+    return [
+        ReportItem(
+            id=r.id,
+            reporter_id=r.reporter_id,
+            reporter_name=f"{r.reporter.first_name} {r.reporter.last_name}".strip() if r.reporter else "Système (auto)",
+            target_type=r.target_type,
+            target_id=r.target_id,
+            reason=r.reason,
+            status=r.status,
+            admin_note=r.admin_note,
+            created_at=r.created_at,
+        )
+        for r in reports
+    ]
+
+
+@router.patch("/reports/{report_id}")
+async def resolve_report(
+    report_id: str,
+    body: ResolveReportRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+):
+    result = await db.execute(select(Report).where(Report.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if body.status.upper() not in ("RESOLVED", "DISMISSED"):
+        raise HTTPException(status_code=400, detail="status must be RESOLVED or DISMISSED")
+    report.status = body.status.upper()
+    report.admin_note = body.admin_note
+    report.resolved_at = datetime.utcnow()
+    await db.commit()
+    return {"id": report_id, "status": report.status}

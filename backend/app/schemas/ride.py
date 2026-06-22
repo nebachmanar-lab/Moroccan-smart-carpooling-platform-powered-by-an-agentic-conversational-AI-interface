@@ -1,6 +1,6 @@
 from pydantic import BaseModel, field_validator
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
 
 
 class RideCreate(BaseModel):
@@ -15,11 +15,19 @@ class RideCreate(BaseModel):
     price_per_seat: float
     pickup_location: Optional[str] = None
     dropoff_location: Optional[str] = None
+    # Recurring rides (C-08)
+    is_recurring: bool = False
+    recurrence_days: Optional[List[int]] = None
+    recurrence_end_date: Optional[datetime] = None
 
-    @field_validator("departure_time")
+    @field_validator("departure_time", "recurrence_end_date", mode="before")
     @classmethod
-    def strip_timezone(cls, v: datetime) -> datetime:
-        if v.tzinfo is not None:
+    def strip_timezone(cls, v) -> datetime:
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = datetime.fromisoformat(v)
+        if isinstance(v, datetime) and v.tzinfo is not None:
             v = v.astimezone(timezone.utc).replace(tzinfo=None)
         return v
 
@@ -70,6 +78,8 @@ class RideResponse(BaseModel):
     pickup_location: Optional[str]
     dropoff_location: Optional[str]
     status: str
+    is_recurring: bool = False
+    recurrence_days: Optional[List[int]] = None
     driver_name: Optional[str] = None
     driver_avg_rating: Optional[float] = None
     driver_rating_count: Optional[int] = None

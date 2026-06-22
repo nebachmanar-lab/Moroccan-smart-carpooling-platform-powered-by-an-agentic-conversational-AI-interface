@@ -13,7 +13,7 @@
 #   alembic upgrade head
 
 import uuid
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, Boolean, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 import enum
@@ -47,6 +47,11 @@ class Ride(Base):
     price_per_seat      = Column(Float, nullable=False)
     pickup_location     = Column(String, nullable=True)
     dropoff_location    = Column(String, nullable=True)
-    status = Column(Enum(RideStatus), default=RideStatus.ACTIVE)    # Relationships
+    status              = Column(Enum(RideStatus), default=RideStatus.ACTIVE)
+    # Recurring rides (C-08): days of week as list [0=Mon … 6=Sun], None = one-time
+    is_recurring        = Column(Boolean, default=False, nullable=False)
+    recurrence_days     = Column(JSON, nullable=True)
+    recurrence_end_date = Column(DateTime, nullable=True)
+
     driver              = relationship("User", back_populates="rides")
     bookings            = relationship("Booking", back_populates="ride")

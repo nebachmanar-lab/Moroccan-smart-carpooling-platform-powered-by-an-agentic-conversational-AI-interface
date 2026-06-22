@@ -463,6 +463,92 @@ async def send_ride_alert_email(
         return False
 
 
+async def send_ride_cancelled_email(
+    to_email: str,
+    passenger_name: str,
+    driver_name: str,
+    origin: str,
+    destination: str,
+    departure: datetime,
+) -> bool:
+    """Notify passenger that the driver cancelled their ride (C-06)."""
+    if not settings.SMTP_HOST or not settings.SMTP_USER:
+        return False
+    dep_str = departure.strftime("%A %d %B %Y à %H:%M")
+    html = f"""
+    <html><body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;color:#333;">
+      <div style="background:#dc2626;padding:24px;border-radius:8px 8px 0 0;text-align:center;">
+        <h1 style="color:#fff;margin:0;font-size:22px;">Trajet annulé par le conducteur</h1>
+      </div>
+      <div style="background:#f9f9f9;padding:24px;border-radius:0 0 8px 8px;border:1px solid #e0e0e0;">
+        <p>Bonjour <strong>{passenger_name}</strong>,</p>
+        <p>Nous sommes désolés de vous informer que le conducteur <strong>{driver_name}</strong> a annulé le trajet suivant :</p>
+        <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+          <tr style="background:#fef2f2;"><td style="padding:10px 14px;font-weight:bold;">Trajet</td><td style="padding:10px 14px;">{origin} → {destination}</td></tr>
+          <tr><td style="padding:10px 14px;font-weight:bold;">Date prévue</td><td style="padding:10px 14px;">{dep_str}</td></tr>
+        </table>
+        <p>Vos places ont été libérées. Nous vous invitons à rechercher un autre trajet disponible.</p>
+        <p style="font-size:12px;color:#888;">Covoit Maroc — Nous faisons de notre mieux pour vous trouver une alternative.</p>
+      </div>
+    </body></html>"""
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"Trajet annulé — {origin} → {destination} du {dep_str}"
+        msg["From"] = f"CovoitMaroc <{settings.SMTP_USER}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send_smtp, to_email, msg)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send ride cancelled email: {e}")
+        return False
+
+
+async def send_passenger_cancelled_email(
+    to_email: str,
+    driver_name: str,
+    passenger_name: str,
+    origin: str,
+    destination: str,
+    departure: datetime,
+    seats: int,
+) -> bool:
+    """Notify driver that a passenger cancelled their booking (C-07)."""
+    if not settings.SMTP_HOST or not settings.SMTP_USER:
+        return False
+    dep_str = departure.strftime("%A %d %B %Y à %H:%M")
+    html = f"""
+    <html><body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;color:#333;">
+      <div style="background:#f59e0b;padding:24px;border-radius:8px 8px 0 0;text-align:center;">
+        <h1 style="color:#fff;margin:0;font-size:22px;">Annulation de réservation</h1>
+      </div>
+      <div style="background:#f9f9f9;padding:24px;border-radius:0 0 8px 8px;border:1px solid #e0e0e0;">
+        <p>Bonjour <strong>{driver_name}</strong>,</p>
+        <p>Le passager <strong>{passenger_name}</strong> a annulé sa réservation pour votre trajet.</p>
+        <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+          <tr style="background:#fffbeb;"><td style="padding:10px 14px;font-weight:bold;">Trajet</td><td style="padding:10px 14px;">{origin} → {destination}</td></tr>
+          <tr><td style="padding:10px 14px;font-weight:bold;">Date</td><td style="padding:10px 14px;">{dep_str}</td></tr>
+          <tr style="background:#fffbeb;"><td style="padding:10px 14px;font-weight:bold;">Places libérées</td><td style="padding:10px 14px;">{seats} place(s)</td></tr>
+        </table>
+        <p>Les places ont été automatiquement remises à disposition sur votre trajet.</p>
+        <p style="font-size:12px;color:#888;">Covoit Maroc · Bon courage pour trouver un autre passager !</p>
+      </div>
+    </body></html>"""
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"Annulation passager — {origin} → {destination}"
+        msg["From"] = f"CovoitMaroc <{settings.SMTP_USER}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send_smtp, to_email, msg)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send passenger cancelled email: {e}")
+        return False
+
+
 async def send_receipt_email(
     to_email: str,
     passenger_name: str,

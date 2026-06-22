@@ -36,6 +36,8 @@ interface Ride {
     origin_lng: number | null;
     destination_lat: number | null;
     destination_lng: number | null;
+    is_recurring?: boolean;
+    recurrence_days?: number[] | null;
 }
 
 interface MyBooking {
@@ -1478,7 +1480,14 @@ function RideCard({
         <div className={`ride-card-driver ${isCancelled ? "cancelled" : ""}`}>
             <div className="ride-card-driver-top" onClick={togglePassengers}>
                 <div>
-                    <p className="ride-card-title">{ride.origin} &rarr; {ride.destination}</p>
+                    <p className="ride-card-title">
+                        {ride.origin} &rarr; {ride.destination}
+                        {ride.is_recurring && (
+                            <span style={{ marginLeft: 8, fontSize: 11, padding: "2px 7px", borderRadius: 10, background: "rgba(99,102,241,.18)", color: "#818cf8", fontWeight: 600, verticalAlign: "middle" }}>
+                                ↻ Récurrent
+                            </span>
+                        )}
+                    </p>
                     <p className="ride-card-meta">{date} · {ride.status}</p>
                 </div>
                 <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>

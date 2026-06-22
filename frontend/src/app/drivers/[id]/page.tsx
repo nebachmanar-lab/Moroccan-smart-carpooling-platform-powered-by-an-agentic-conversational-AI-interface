@@ -53,6 +53,20 @@ export default function DriverProfilePage() {
     const [prefs, setPrefs] = useState<Prefs | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [reportSent, setReportSent] = useState(false);
+
+    async function handleReport() {
+        const token = localStorage.getItem("access_token");
+        if (!token) { alert("Connectez-vous pour signaler ce conducteur."); return; }
+        const reason = prompt("Raison du signalement :");
+        if (!reason?.trim()) return;
+        const res = await fetch(`${apiUrl}/reports`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ target_type: "user", target_id: id, reason: reason.trim() }),
+        });
+        if (res.ok || res.status === 409) setReportSent(true);
+    }
 
     useEffect(() => {
         async function load() {
@@ -148,7 +162,7 @@ export default function DriverProfilePage() {
                         <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg,#6366f1,#ec4899)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
                             {fullName[0]?.toUpperCase() ?? "?"}
                         </div>
-                        <div>
+                        <div style={{ flex: 1 }}>
                             <h1 style={{ margin: 0, fontSize: "clamp(20px,3vw,28px)", letterSpacing: "-.04em" }}>{fullName}</h1>
                             <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 10 }}>
                                 {profile.avg_rating != null ? (
@@ -161,6 +175,19 @@ export default function DriverProfilePage() {
                                     <span style={{ color: "var(--text-muted)", fontSize: 13 }}>Aucun avis pour le moment</span>
                                 )}
                             </div>
+                        </div>
+                        {/* ADM-01: report driver */}
+                        <div style={{ flexShrink: 0, textAlign: "right" }}>
+                            {reportSent ? (
+                                <span style={{ fontSize: 12, color: "#22c55e" }}>✓ Signalement envoyé</span>
+                            ) : (
+                                <button
+                                    onClick={handleReport}
+                                    style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 12, cursor: "pointer", textDecoration: "underline" }}
+                                >
+                                    Signaler ce conducteur
+                                </button>
+                            )}
                         </div>
                     </div>
 

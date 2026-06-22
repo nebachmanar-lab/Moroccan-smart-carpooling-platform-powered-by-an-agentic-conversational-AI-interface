@@ -10,13 +10,14 @@ from groq import AsyncGroq
 import os
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
 
 import uuid
 
 from ..models.user import User
 from ..models.ride import Ride, RideStatus
+from ..models.booking import Booking, BookingStatus
 from ..schemas.booking import BookingCreate
 from ..schemas.ai import AgentMessage, AgentResponse
 from . import agent_tools as tools
@@ -31,16 +32,48 @@ MAX_TOOL_ITERATIONS = 6
 # System prompt
 # ---------------------------------------------------------------------------
 
-def _system_prompt(user: User) -> str:
+async def _get_user_top_routes(user: User, db: AsyncSession) -> str:
+    """Query DB for the user's most-used routes to personalise the agent (IA-05)."""
+    try:
+        role = user.role.value if hasattr(user.role, "value") else str(user.role)
+        if role == "DRIVER":
+            result = await db.execute(
+                select(Ride.origin, Ride.destination, func.count(Ride.id).label("n"))
+                .where(Ride.driver_id == user.id)
+                .group_by(Ride.origin, Ride.destination)
+                .order_by(func.count(Ride.id).desc())
+                .limit(3)
+            )
+        else:
+            result = await db.execute(
+                select(Ride.origin, Ride.destination, func.count(Booking.id).label("n"))
+                .join(Ride, Booking.ride_id == Ride.id)
+                .where(Booking.passenger_id == user.id, Booking.status == BookingStatus.CONFIRMED)
+                .group_by(Ride.origin, Ride.destination)
+                .order_by(func.count(Booking.id).desc())
+                .limit(3)
+            )
+        rows = result.all()
+        if not rows:
+            return ""
+        routes = ", ".join(f"{r.origin} → {r.destination}" for r in rows)
+        label = "frequent routes published" if role == "DRIVER" else "past routes taken"
+        return f"\nUser's {label}: {routes}. Prioritise these when relevant.\n"
+    except Exception:
+        return ""
+
+
+async def _system_prompt(user: User, db: AsyncSession) -> str:
     today = date.today()
     tomorrow = today + timedelta(days=1)
     role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    top_routes = await _get_user_top_routes(user, db)
 
     return f"""You are Rafi, the AI copilot of CovoitMaroc — the Moroccan carpooling platform.
 You are NOT a chatbot. You are an intelligent app controller that uses tools to orchestrate real features.
 
 Current user: {user.first_name} {user.last_name} | Role: {role}
-Today: {today}. Tomorrow: {tomorrow}.
+Today: {today}. Tomorrow: {tomorrow}.{top_routes}
 
 ## Available tools — use the right one for each action
 
@@ -332,7 +365,7 @@ async def agent_chat(
     client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
     llm_messages: list[dict] = [
-        {"role": "system", "content": _system_prompt(user)},
+        {"role": "system", "content": await _system_prompt(user, db)},
         *[{"role": m.role, "content": m.content} for m in messages],
     ]
 

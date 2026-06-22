@@ -15,6 +15,7 @@ interface Ride {
     driver_name: string | null;
     driver_avg_rating: number | null;
     driver_rating_count: number | null;
+    is_recurring?: boolean;
 }
 
 function SearchContent() {
@@ -235,6 +236,12 @@ function RideCard({ ride }: { ride: Ride }) {
             <div style={{ textAlign: "right", flexShrink: 0 }}>
                 <p className="ride-card-price">{ride.price_per_seat} MAD</p>
                 <span className="badge">{ride.available_seats} place(s)</span>
+                {ride.is_recurring && (
+                    <span style={{ display: "block", marginTop: 4, fontSize: 11, padding: "2px 7px", borderRadius: 10,
+                        background: "rgba(99,102,241,.18)", color: "#818cf8", fontWeight: 600 }}>
+                        ↻ Récurrent
+                    </span>
+                )}
             </div>
         </Link>
     );

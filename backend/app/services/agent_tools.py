@@ -5,7 +5,8 @@ and return structured dicts.  No DB writes happen here except
 save_user_preference — which is non-sensitive.
 Booking creation happens in agent_service after explicit user confirmation.
 """
-import json
+import os
+import secrets as _secrets
 from datetime import datetime, timedelta
 from math import radians, sin, cos, sqrt, atan2
 
@@ -16,6 +17,10 @@ from sqlalchemy.orm import joinedload
 from ..models.ride import Ride, RideStatus
 from ..models.booking import Booking, BookingStatus
 from ..models.preferences import DriverPreferences
+from ..models.rating import Rating
+from ..models.passenger_rating import PassengerRating
+from ..models.alert import RideAlert
+from ..models.report import Report
 from ..models.user import User, Role
 from ..data.moroccan_cities import MOROCCAN_CITIES
 
@@ -667,6 +672,301 @@ def get_payment_methods() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Tool: get_driver_ratings
+# ---------------------------------------------------------------------------
+
+async def get_driver_ratings(db: AsyncSession, driver_id: str) -> dict:
+    result = await db.execute(
+        select(Rating).where(Rating.driver_id == driver_id).order_by(Rating.created_at.desc()).limit(10)
+    )
+    ratings = result.scalars().all()
+    avg = round(sum(r.stars for r in ratings) / len(ratings), 1) if ratings else 0.0
+    return {
+        "driver_id": driver_id,
+        "avg_stars": avg,
+        "total_reviews": len(ratings),
+        "reviews": [
+            {"stars": r.stars, "comment": r.comment, "created_at": r.created_at.isoformat()}
+            for r in ratings
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: submit_rating  (passenger rates driver — direct write)
+# ---------------------------------------------------------------------------
+
+async def submit_rating(db: AsyncSession, user: User, ride_id: str, stars: int, comment: str | None = None) -> dict:
+    result = await db.execute(select(Ride).where(Ride.id == ride_id))
+    ride = result.scalar_one_or_none()
+    if not ride:
+        return {"success": False, "error": "Trajet introuvable."}
+    if ride.status != RideStatus.COMPLETED:
+        return {"success": False, "error": "Le trajet doit être terminé pour laisser une note."}
+    booking_result = await db.execute(
+        select(Booking).where(
+            Booking.ride_id == ride_id,
+            Booking.passenger_id == user.id,
+            Booking.status == BookingStatus.CONFIRMED,
+        )
+    )
+    if not booking_result.scalar_one_or_none():
+        return {"success": False, "error": "Vous n'avez pas participé à ce trajet."}
+    existing = await db.execute(
+        select(Rating).where(Rating.ride_id == ride_id, Rating.passenger_id == user.id)
+    )
+    if existing.scalar_one_or_none():
+        return {"success": False, "error": "Vous avez déjà évalué ce trajet."}
+    if not (1 <= stars <= 5):
+        return {"success": False, "error": "La note doit être entre 1 et 5 étoiles."}
+    import uuid as _uuid
+    rating = Rating(
+        id=str(_uuid.uuid4()),
+        ride_id=ride_id,
+        passenger_id=user.id,
+        driver_id=ride.driver_id,
+        stars=stars,
+        comment=comment,
+    )
+    db.add(rating)
+    await db.commit()
+    return {"success": True, "message": f"Avis enregistré : {stars}/5 étoiles.", "stars": stars}
+
+
+# ---------------------------------------------------------------------------
+# Tool: rate_passenger_by_driver  (driver rates passenger — direct write)
+# ---------------------------------------------------------------------------
+
+async def rate_passenger_by_driver(
+    db: AsyncSession, user: User, ride_id: str, passenger_id: str, stars: int, comment: str | None = None
+) -> dict:
+    result = await db.execute(
+        select(Ride).where(Ride.id == ride_id, Ride.driver_id == user.id)
+    )
+    ride = result.scalar_one_or_none()
+    if not ride:
+        return {"success": False, "error": "Trajet introuvable ou vous n'en êtes pas le conducteur."}
+    if ride.status != RideStatus.COMPLETED:
+        return {"success": False, "error": "Le trajet doit être terminé pour évaluer un passager."}
+    booking_result = await db.execute(
+        select(Booking).where(
+            Booking.ride_id == ride_id,
+            Booking.passenger_id == passenger_id,
+            Booking.status == BookingStatus.CONFIRMED,
+        )
+    )
+    if not booking_result.scalar_one_or_none():
+        return {"success": False, "error": "Ce passager n'a pas participé à ce trajet."}
+    existing = await db.execute(
+        select(PassengerRating).where(
+            PassengerRating.ride_id == ride_id,
+            PassengerRating.driver_id == user.id,
+            PassengerRating.passenger_id == passenger_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return {"success": False, "error": "Vous avez déjà évalué ce passager."}
+    if not (1 <= stars <= 5):
+        return {"success": False, "error": "La note doit être entre 1 et 5 étoiles."}
+    import uuid as _uuid
+    rating = PassengerRating(
+        id=str(_uuid.uuid4()),
+        ride_id=ride_id,
+        driver_id=user.id,
+        passenger_id=passenger_id,
+        stars=stars,
+        comment=comment,
+    )
+    db.add(rating)
+    await db.commit()
+    return {"success": True, "message": f"Passager évalué : {stars}/5 étoiles.", "stars": stars}
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_my_alerts
+# ---------------------------------------------------------------------------
+
+async def get_my_alerts(db: AsyncSession, user: User) -> dict:
+    result = await db.execute(
+        select(RideAlert)
+        .where(RideAlert.user_id == user.id, RideAlert.is_active == True)
+        .order_by(RideAlert.created_at.desc())
+    )
+    alerts = result.scalars().all()
+    return {
+        "alerts": [
+            {"id": a.id, "origin": a.origin, "destination": a.destination, "created_at": a.created_at.isoformat()}
+            for a in alerts
+        ],
+        "count": len(alerts),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: create_search_alert
+# ---------------------------------------------------------------------------
+
+async def create_search_alert(db: AsyncSession, user: User, origin: str, destination: str) -> dict:
+    existing = await db.execute(
+        select(RideAlert).where(
+            RideAlert.user_id == user.id,
+            RideAlert.origin.ilike(origin.strip()),
+            RideAlert.destination.ilike(destination.strip()),
+            RideAlert.is_active == True,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return {"success": False, "error": "Vous avez déjà une alerte active pour ce trajet."}
+    import uuid as _uuid
+    alert = RideAlert(id=str(_uuid.uuid4()), user_id=user.id, origin=origin.strip(), destination=destination.strip())
+    db.add(alert)
+    await db.commit()
+    return {
+        "success": True,
+        "message": f"Alerte créée pour {origin} → {destination}. Vous serez notifié par email dès qu'un trajet est publié.",
+        "origin": origin,
+        "destination": destination,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: delete_search_alert
+# ---------------------------------------------------------------------------
+
+async def delete_search_alert(db: AsyncSession, user: User, alert_id: str) -> dict:
+    result = await db.execute(
+        select(RideAlert).where(RideAlert.id == alert_id, RideAlert.user_id == user.id)
+    )
+    alert = result.scalar_one_or_none()
+    if not alert:
+        return {"success": False, "error": "Alerte introuvable ou n'appartient pas à ce compte."}
+    alert.is_active = False
+    await db.commit()
+    return {"success": True, "message": f"Alerte {alert.origin} → {alert.destination} supprimée."}
+
+
+# ---------------------------------------------------------------------------
+# Tool: prepare_report  (triggers confirmation before writing)
+# ---------------------------------------------------------------------------
+
+async def prepare_report(db: AsyncSession, user: User, target_type: str, target_id: str, reason: str) -> dict:
+    if target_type not in ("ride", "user"):
+        return {"confirm_required": False, "error": "Type invalide. Utilisez 'ride' ou 'user'."}
+    if not reason.strip():
+        return {"confirm_required": False, "error": "La raison du signalement est requise."}
+    existing = await db.execute(
+        select(Report).where(
+            Report.reporter_id == user.id,
+            Report.target_type == target_type,
+            Report.target_id == target_id,
+            Report.status == "PENDING",
+        )
+    )
+    if existing.scalar_one_or_none():
+        return {"confirm_required": False, "error": "Vous avez déjà un signalement en attente pour cet élément."}
+    return {
+        "confirm_required": True,
+        "action": "create_report",
+        "summary": {
+            "target_type": target_type,
+            "target_id": target_id,
+            "reason": reason.strip(),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: prepare_edit_ride  (triggers confirmation before writing)
+# ---------------------------------------------------------------------------
+
+async def prepare_edit_ride(
+    db: AsyncSession,
+    user: User,
+    ride_id: str,
+    price_per_seat: float | None = None,
+    available_seats: int | None = None,
+    departure_time: str | None = None,
+    pickup_location: str | None = None,
+    dropoff_location: str | None = None,
+) -> dict:
+    result = await db.execute(
+        select(Ride).where(Ride.id == ride_id, Ride.driver_id == user.id)
+    )
+    ride = result.scalar_one_or_none()
+    if not ride:
+        return {"confirm_required": False, "error": "Trajet introuvable ou vous n'en êtes pas le conducteur."}
+    if ride.status in (RideStatus.CANCELLED, RideStatus.COMPLETED):
+        return {"confirm_required": False, "error": "Ce trajet ne peut plus être modifié."}
+
+    updates: dict = {}
+    if price_per_seat is not None:
+        p = float(price_per_seat)
+        if p <= 0:
+            return {"confirm_required": False, "error": "Le prix doit être supérieur à 0 MAD."}
+        updates["price_per_seat"] = p
+    if available_seats is not None:
+        s = int(available_seats)
+        if not (0 <= s <= 8):
+            return {"confirm_required": False, "error": "Le nombre de places doit être entre 0 et 8."}
+        updates["available_seats"] = s
+    if departure_time is not None:
+        try:
+            dt = datetime.fromisoformat(departure_time)
+            if dt <= datetime.now():
+                return {"confirm_required": False, "error": "La date de départ doit être dans le futur."}
+            updates["departure_time"] = dt.isoformat()
+        except ValueError:
+            return {"confirm_required": False, "error": f"Date invalide : {departure_time}. Utilisez le format ISO (YYYY-MM-DDTHH:MM)."}
+    if pickup_location is not None:
+        updates["pickup_location"] = pickup_location
+    if dropoff_location is not None:
+        updates["dropoff_location"] = dropoff_location
+
+    if not updates:
+        return {"confirm_required": False, "error": "Aucune modification fournie."}
+
+    return {
+        "confirm_required": True,
+        "action": "edit_ride",
+        "summary": {
+            "ride_id": ride_id,
+            "origin": ride.origin,
+            "destination": ride.destination,
+            "current_departure_time": ride.departure_time.isoformat(),
+            "current_price_per_seat": ride.price_per_seat,
+            "current_available_seats": ride.available_seats,
+            **updates,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_tracking_share_link
+# ---------------------------------------------------------------------------
+
+async def get_tracking_share_link(db: AsyncSession, user: User, ride_id: str) -> dict:
+    result = await db.execute(
+        select(Ride).where(Ride.id == ride_id, Ride.driver_id == user.id)
+    )
+    ride = result.scalar_one_or_none()
+    if not ride:
+        return {"success": False, "error": "Trajet introuvable ou vous n'en êtes pas le conducteur."}
+
+    from ..routes.tracking import _share_tokens
+    existing = next((t for t, rid in _share_tokens.items() if rid == ride_id), None)
+    token = existing or _secrets.token_urlsafe(16)
+    _share_tokens[token] = ride_id
+
+    frontend_url = os.getenv("NEXT_PUBLIC_APP_URL", "http://localhost:3000")
+    share_url = f"{frontend_url}/track/{ride_id}?share_token={token}"
+    return {
+        "success": True,
+        "share_url": share_url,
+        "message": f"Lien de suivi GPS prêt. Partagez ce lien avec votre famille : {share_url}",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tool schema definitions (OpenAI / Groq format)
 # ---------------------------------------------------------------------------
 
@@ -896,6 +1196,139 @@ TOOL_DEFINITIONS = [
             "name": "get_payment_methods",
             "description": "Get the available payment methods for booking a ride.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_driver_ratings",
+            "description": "Get ratings and reviews for a specific driver. Use when user asks about a driver's reputation or stars.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "driver_id": {"type": "string", "description": "The driver's user UUID"},
+                },
+                "required": ["driver_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_rating",
+            "description": "Submit a star rating and optional comment for a driver after a COMPLETED ride. The passenger must have had a confirmed booking on that ride.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ride_id": {"type": "string", "description": "The ride UUID to rate"},
+                    "stars": {"type": "integer", "description": "Rating from 1 to 5 stars"},
+                    "comment": {"type": "string", "description": "Optional written review"},
+                },
+                "required": ["ride_id", "stars"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rate_passenger_by_driver",
+            "description": "As a DRIVER, rate a passenger after a COMPLETED ride.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ride_id": {"type": "string", "description": "The ride UUID"},
+                    "passenger_id": {"type": "string", "description": "The passenger's user UUID"},
+                    "stars": {"type": "integer", "description": "Rating from 1 to 5 stars"},
+                    "comment": {"type": "string", "description": "Optional written review"},
+                },
+                "required": ["ride_id", "passenger_id", "stars"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_my_alerts",
+            "description": "Get the user's active search alerts. Use when user asks to see their alerts or notifications for routes.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_search_alert",
+            "description": "Create an email alert so the user is notified when a ride matching their route is published. Use when user asks to be notified or set an alert for a route.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origin": {"type": "string", "description": "Departure city"},
+                    "destination": {"type": "string", "description": "Arrival city"},
+                },
+                "required": ["origin", "destination"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_search_alert",
+            "description": "Delete / deactivate a search alert. Call get_my_alerts first if the user doesn't know the alert ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "alert_id": {"type": "string", "description": "The alert UUID to delete"},
+                },
+                "required": ["alert_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_report",
+            "description": "Report a ride or user to moderators. Shows a confirmation before submitting. Use when user says 'signaler', 'report', 'abuse', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_type": {"type": "string", "enum": ["ride", "user"], "description": "'ride' to report a ride, 'user' to report a user"},
+                    "target_id": {"type": "string", "description": "UUID of the ride or user to report"},
+                    "reason": {"type": "string", "description": "Reason for the report (detailed description of the problem)"},
+                },
+                "required": ["target_type", "target_id", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_edit_ride",
+            "description": "Modify a published ride (price, seats, departure time, pickup/dropoff). Shows a confirmation summary before saving. DRIVER only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ride_id": {"type": "string", "description": "UUID of the ride to edit"},
+                    "price_per_seat": {"anyOf": [{"type": "number"}, {"type": "string"}], "description": "New price per seat in MAD"},
+                    "available_seats": {"anyOf": [{"type": "integer"}, {"type": "string"}], "description": "New number of available seats"},
+                    "departure_time": {"type": "string", "description": "New departure datetime in ISO format (YYYY-MM-DDTHH:MM)"},
+                    "pickup_location": {"type": "string", "description": "New pickup point description"},
+                    "dropoff_location": {"type": "string", "description": "New dropoff point description"},
+                },
+                "required": ["ride_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_tracking_share_link",
+            "description": "Generate a public GPS tracking share link for a ride. Anyone with the link can watch the live position without logging in. DRIVER only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ride_id": {"type": "string", "description": "UUID of the ride to share tracking for"},
+                },
+                "required": ["ride_id"],
+            },
         },
     },
 ]

@@ -89,23 +89,34 @@ Today: {today}. Tomorrow: {tomorrow}.{top_routes}
 - get_my_bookings() → list of MY reservations
 - prepare_booking(ride_id, seats?) → show booking summary + ask confirmation (does NOT book yet)
   ⚠️ Cannot book your own ride (you are the driver of it)
-  ⚠️ Cannot book if already booked that ride
 - prepare_cancel_booking(booking_id) → show cancel summary + ask confirmation
+- submit_rating(ride_id, stars, comment?) → rate a driver after a COMPLETED ride (1–5 stars)
+- get_my_alerts() → list active search alerts
+- create_search_alert(origin, destination) → get email when a matching ride is published
+- delete_search_alert(alert_id) → remove a search alert
 
 ### DRIVER actions
 - get_my_rides() → list of MY published rides
 - get_driver_bookings(ride_id?) → see who booked my rides
 - prepare_publish_ride(origin, destination, departure_date, departure_time, seats, price_per_seat, pickup_location?, dropoff_location?) → show publish summary + ask confirmation
 - prepare_cancel_ride(ride_id) → show cancel summary + ask confirmation
+- prepare_edit_ride(ride_id, price_per_seat?, available_seats?, departure_time?, pickup_location?, dropoff_location?) → modify a ride + ask confirmation
 - get_user_preferences() → view my current preferences
 - update_preferences(smoking_allowed?, pets_allowed?, music_allowed?, air_conditioning?, talking_preference?, luggage_size?) → update preferences immediately (no confirmation needed)
+- rate_passenger_by_driver(ride_id, passenger_id, stars, comment?) → rate a passenger after a COMPLETED ride
+- get_tracking_share_link(ride_id) → get a public GPS tracking URL to share with family
+
+### BOTH ROLES
+- get_driver_ratings(driver_id) → view ratings & reviews for any driver
+- prepare_report(target_type, target_id, reason) → report a ride or user to moderators + ask confirmation
 
 ## Rules
 1. ALWAYS call a tool — never invent data, prices, or statuses.
-2. For ANY booking/publishing/cancellation: use the prepare_* tool first. Wait for user confirmation before the action executes.
-3. If required info is missing for a tool call, ask for it before calling.
-4. A driver CAN also search and book rides as a passenger (they travel too).
-5. A passenger CANNOT publish rides.
+2. For booking/publishing/cancellation/editing/reporting: use the prepare_* tool first. Wait for user confirmation.
+3. submit_rating, rate_passenger_by_driver, create_search_alert, delete_search_alert, update_preferences — execute directly without extra confirmation.
+4. If required info is missing for a tool call, ask for it before calling.
+5. A driver CAN also search and book rides as a passenger (they travel too).
+6. A passenger CANNOT publish rides.
 
 ## Date handling
 - "demain" / "ghdwa" / "غدا" = {tomorrow}
@@ -221,6 +232,31 @@ async def _execute_tool(name: str, args: dict, user: User, db: AsyncSession) -> 
             return tools.get_tourist_info(args["destination"])
         if name == "get_payment_methods":
             return tools.get_payment_methods()
+        if name == "get_driver_ratings":
+            return await tools.get_driver_ratings(db, args["driver_id"])
+        if name == "submit_rating":
+            return await tools.submit_rating(db, user, args["ride_id"], int(args["stars"]), args.get("comment"))
+        if name == "rate_passenger_by_driver":
+            return await tools.rate_passenger_by_driver(db, user, args["ride_id"], args["passenger_id"], int(args["stars"]), args.get("comment"))
+        if name == "get_my_alerts":
+            return await tools.get_my_alerts(db, user)
+        if name == "create_search_alert":
+            return await tools.create_search_alert(db, user, args["origin"], args["destination"])
+        if name == "delete_search_alert":
+            return await tools.delete_search_alert(db, user, args["alert_id"])
+        if name == "prepare_report":
+            return await tools.prepare_report(db, user, args["target_type"], args["target_id"], args["reason"])
+        if name == "prepare_edit_ride":
+            return await tools.prepare_edit_ride(
+                db, user, args["ride_id"],
+                price_per_seat=args.get("price_per_seat"),
+                available_seats=args.get("available_seats"),
+                departure_time=args.get("departure_time"),
+                pickup_location=args.get("pickup_location"),
+                dropoff_location=args.get("dropoff_location"),
+            )
+        if name == "get_tracking_share_link":
+            return await tools.get_tracking_share_link(db, user, args["ride_id"])
         return {"error": f"Unknown tool: {name}"}
     except Exception as exc:
         return {"error": str(exc)}
@@ -326,6 +362,55 @@ async def agent_chat(
             )
         except Exception as exc:
             return AgentResponse(reply=f"Erreur lors de la publication : {exc}", ui_action="error")
+
+    if confirmed and pending_action and pending_action.get("action") == "create_report":
+        s = pending_action.get("summary", {})
+        try:
+            from ..models.report import Report as _Report
+            import uuid as _uuid
+            report = _Report(
+                id=str(_uuid.uuid4()),
+                reporter_id=user.id,
+                target_type=s["target_type"],
+                target_id=s["target_id"],
+                reason=s["reason"],
+                status="PENDING",
+            )
+            db.add(report)
+            await db.commit()
+            label = "trajet" if s["target_type"] == "ride" else "utilisateur"
+            return AgentResponse(
+                reply=f"Signalement envoyé. Notre équipe de modération va examiner ce {label}.",
+                ui_action="report_sent",
+                data={"report_id": report.id},
+            )
+        except Exception as exc:
+            return AgentResponse(reply=f"Erreur lors du signalement : {exc}", ui_action="error")
+
+    if confirmed and pending_action and pending_action.get("action") == "edit_ride":
+        s = pending_action.get("summary", {})
+        ride_id = s["ride_id"]
+        try:
+            result = await db.execute(
+                select(Ride).where(Ride.id == ride_id, Ride.driver_id == user.id)
+            )
+            ride = result.scalar_one_or_none()
+            if not ride:
+                return AgentResponse(reply="Trajet introuvable.", ui_action="error")
+            for field in ("price_per_seat", "available_seats", "pickup_location", "dropoff_location"):
+                if field in s and s[field] is not None:
+                    setattr(ride, field, s[field])
+            if "departure_time" in s and s["departure_time"]:
+                from datetime import datetime as _dt
+                ride.departure_time = _dt.fromisoformat(s["departure_time"])
+            await db.commit()
+            return AgentResponse(
+                reply=f"Trajet {ride.origin} → {ride.destination} modifié avec succès.",
+                ui_action="ride_updated",
+                data={"ride_id": ride_id},
+            )
+        except Exception as exc:
+            return AgentResponse(reply=f"Erreur lors de la modification : {exc}", ui_action="error")
 
     if confirmed and pending_action and pending_action.get("action") == "create_booking":
         ride_id = pending_action["ride_id"]
@@ -501,6 +586,39 @@ async def agent_chat(
                                 "seats": summary["seats"],
                             },
                         )
+
+                # Confirmation intercept for report and ride edit
+                if tool_result.get("confirm_required") and tool_result.get("action") == "create_report":
+                    s = tool_result["summary"]
+                    label = "trajet" if s["target_type"] == "ride" else "utilisateur"
+                    return AgentResponse(
+                        reply=f"Confirmer le signalement de ce {label} ?\nRaison : {s['reason']}\n\nCette action sera transmise à l'équipe de modération.",
+                        ui_action="show_report_summary",
+                        data={"report_summary": s},
+                        needs_confirmation=True,
+                        pending_action={"action": "create_report", "summary": s},
+                    )
+
+                if tool_result.get("confirm_required") and tool_result.get("action") == "edit_ride":
+                    s = tool_result["summary"]
+                    lines = [f"Confirmer les modifications du trajet {s['origin']} → {s['destination']} ?"]
+                    if "price_per_seat" in s:
+                        lines.append(f"💰 Nouveau prix : {s['price_per_seat']} MAD (était {s['current_price_per_seat']} MAD)")
+                    if "available_seats" in s:
+                        lines.append(f"💺 Nouvelles places : {s['available_seats']} (était {s['current_available_seats']})")
+                    if "departure_time" in s:
+                        lines.append(f"📅 Nouveau départ : {s['departure_time'][:16].replace('T', ' à ')} (était {s['current_departure_time'][:16].replace('T', ' à ')})")
+                    if "pickup_location" in s:
+                        lines.append(f"📍 Point de prise en charge : {s['pickup_location']}")
+                    if "dropoff_location" in s:
+                        lines.append(f"🏁 Point de dépôt : {s['dropoff_location']}")
+                    return AgentResponse(
+                        reply="\n".join(lines),
+                        ui_action="show_edit_ride_summary",
+                        data={"edit_summary": s},
+                        needs_confirmation=True,
+                        pending_action={"action": "edit_ride", "summary": s},
+                    )
 
                 # Track which UI components to render
                 if name == "search_rides" and not tool_result.get("error"):

@@ -34,14 +34,13 @@ interface Guide {
     language: string;
 }
 
-type Tab = "carte" | "monuments" | "restaurants" | "hebergements" | "sous-trajets" | "guide";
+type Tab = "carte" | "monuments" | "restaurants" | "hebergements" | "guide";
 
 const TABS: { id: Tab; label: string }[] = [
     { id: "carte",        label: "Carte & POI" },
     { id: "monuments",    label: "Monuments" },
     { id: "restaurants",  label: "Restaurants" },
     { id: "hebergements", label: "Hébergements" },
-    { id: "sous-trajets", label: "Sous-trajets" },
     { id: "guide",        label: "Guide IA" },
 ];
 
@@ -230,9 +229,6 @@ function TouristPageInner() {
     const [accomFilter,    setAccomFilter]    = useState("Tous");
     const [showCat, setShowCat] = useState<Set<string>>(new Set(["poi", "restaurant", "accommodation"]));
 
-    // Sub-trip stops (T-04)
-    const [stops, setStops] = useState<string[]>(["", ""]);
-
     // ── Select trip (origin optional, destination required) ──────────────────────
 
     const selectTrip = useCallback(async (dest: string, org: string = "") => {
@@ -245,7 +241,6 @@ function TouristPageInner() {
         setGuide(null);
         setExploreError("");
         setActiveTab("carte");
-        setStops(org.trim() ? [org.trim(), destination] : [destination, ""]);
         setExploreLoading(true);
 
         try {
@@ -760,80 +755,6 @@ function TouristPageInner() {
 
                             <div className="tourist-accom-note">
                                 Prix indicatifs basés sur le type d&apos;hébergement · Réservez directement auprès de l&apos;établissement.
-                            </div>
-                        </div>
-                    )}
-
-                    {/* ── Tab: Sous-trajets (T-04) ── */}
-                    {activeTab === "sous-trajets" && (
-                        <div className="tourist-tab-content">
-                            <p className="tourist-section-desc">
-                                Planifiez un itinéraire multi-étapes et trouvez un covoiturage pour chaque tronçon.
-                            </p>
-
-                            <div className="sub-trip-planner">
-                                {stops.map((stop, i) => (
-                                    <div key={i}>
-                                        <div className="stop-row">
-                                            <span className="stop-index">{i + 1}</span>
-                                            <input
-                                                className="stop-input"
-                                                type="text"
-                                                placeholder={i === 0 ? "Ville de départ" : "Prochaine étape"}
-                                                value={stop}
-                                                onChange={(e) => {
-                                                    const next = [...stops];
-                                                    next[i] = e.target.value;
-                                                    setStops(next);
-                                                }}
-                                            />
-                                            {stops.length > 2 && (
-                                                <button
-                                                    className="stop-remove-btn"
-                                                    onClick={() => setStops(stops.filter((_, j) => j !== i))}
-                                                >×</button>
-                                            )}
-                                        </div>
-
-                                        {i < stops.length - 1 && stops[i] && stops[i + 1] && (
-                                            <div className="leg-card">
-                                                <div className="leg-route">
-                                                    <span>{stops[i]}</span>
-                                                    <span className="leg-arrow">→</span>
-                                                    <span>{stops[i + 1]}</span>
-                                                </div>
-                                                <Link
-                                                    href={`/search?origin=${encodeURIComponent(stops[i])}&destination=${encodeURIComponent(stops[i + 1])}`}
-                                                    className="btn btn-primary btn-sm"
-                                                >
-                                                    Chercher un covoiturage
-                                                </Link>
-                                            </div>
-                                        )}
-
-                                        {i < stops.length - 1 && <div className="stop-connector" />}
-                                    </div>
-                                ))}
-
-                                <div className="stop-actions">
-                                    <button className="btn btn-secondary btn-sm" onClick={() => setStops([...stops, ""])}>
-                                        + Ajouter une étape
-                                    </button>
-                                    {stops.length >= 2 && stops[0] && (
-                                        <button
-                                            className="btn btn-secondary btn-sm"
-                                            onClick={() => {
-                                                if (stops[stops.length - 1] !== stops[0]) setStops([...stops, stops[0]]);
-                                            }}
-                                        >
-                                            ↩ Ajouter le retour
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="tourist-accom-note" style={{ marginTop: 16 }}>
-                                Chaque tronçon s&apos;ouvre dans la recherche de covoiturage. Connectez-vous pour réserver.
                             </div>
                         </div>
                     )}

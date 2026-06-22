@@ -1,0 +1,255 @@
+
+<style>
+  .phase { border-radius: var(--border-radius-lg); border: 0.5px solid var(--color-border-tertiary); margin-bottom: 20px; overflow: hidden; }
+  .phase-header { padding: 14px 20px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .phase-header:hover { background: var(--color-background-secondary); }
+  .phase-title { font-size: 15px; font-weight: 500; color: var(--color-text-primary); flex: 1; }
+  .phase-badge { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 500; }
+  .phase-days { font-size: 12px; color: var(--color-text-secondary); }
+  .phase-body { padding: 0 20px 16px; }
+  .step { display: flex; gap: 12px; padding: 10px 0; border-bottom: 0.5px solid var(--color-border-tertiary); align-items: flex-start; }
+  .step:last-child { border-bottom: none; }
+  .step-dot { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; flex-shrink: 0; margin-top: 1px; }
+  .step-main { flex: 1; }
+  .step-title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 3px; }
+  .step-desc { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; }
+  .step-ids { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .id-tag { font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 500; }
+  .days-tag { font-size: 11px; color: var(--color-text-tertiary); white-space: nowrap; margin-top: 2px; }
+  .timeline { display: flex; gap: 3px; margin: 0 0 16px; padding: 0 0 12px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .tday { flex: 1; height: 6px; border-radius: 3px; }
+  .start-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 14px; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary); background: transparent; color: var(--color-text-primary); cursor: pointer; margin-top: 8px; }
+  .start-btn:hover { background: var(--color-background-secondary); }
+
+  .p1-badge { background: #CEECF9; color: #0C5F8A; }
+  .p2-badge { background: #D5EED9; color: #1A5E2A; }
+  .p3-badge { background: #F5E0FA; color: #6A2080; }
+  @media (prefers-color-scheme: dark) {
+    .p1-badge { background: #0C447C; color: #B5D4F4; }
+    .p2-badge { background: #27500A; color: #C0DD97; }
+    .p3-badge { background: #4B1528; color: #F4C0D1; }
+  }
+
+  .dot-p1 { background: #B5D4F4; color: #0C447C; }
+  .dot-p2 { background: #C0DD97; color: #27500A; }
+  .dot-p3 { background: #F4C0D1; color: #6A2080; }
+  @media (prefers-color-scheme: dark) {
+    .dot-p1 { background: #0C447C; color: #B5D4F4; }
+    .dot-p2 { background: #27500A; color: #C0DD97; }
+    .dot-p3 { background: #4B1528; color: #F4C0D1; }
+  }
+
+  .tag-p1 { background: #E6F1FB; color: #185FA5; }
+  .tag-p2 { background: #EAF3DE; color: #3B6D11; }
+  .tag-p3 { background: #FBEAF0; color: #993556; }
+  @media (prefers-color-scheme: dark) {
+    .tag-p1 { background: #042C53; color: #85B7EB; }
+    .tag-p2 { background: #173404; color: #97C459; }
+    .tag-p3 { background: #4B1528; color: #ED93B1; }
+  }
+  .bar-p1 { background: #85B7EB; }
+  .bar-p2 { background: #97C459; }
+  .bar-p3 { background: #ED93B1; }
+</style>
+
+<div style="padding: 4px 0 16px;">
+  <div style="font-size: 13px; color: var(--color-text-secondary); margin-bottom: 10px;">20-day delivery timeline</div>
+  <div class="timeline" id="timeline"></div>
+</div>
+
+<div class="phase" id="p1">
+  <div class="phase-header" onclick="toggle('p1')">
+    <span class="phase-badge p1-badge">Phase 1 · MVP Core</span>
+    <span class="phase-title">Auth, rides & basic booking</span>
+    <span class="phase-days">Days 1–7</span>
+    <i class="ti ti-chevron-down" id="p1-icon" style="font-size:16px;color:var(--color-text-secondary);transition:transform .2s"></i>
+  </div>
+  <div class="phase-body" id="p1-body">
+    <div class="step">
+      <div class="step-dot dot-p1">1</div>
+      <div class="step-main">
+        <div class="step-title">Project setup & auth</div>
+        <div class="step-desc">Scaffold the monorepo (Next.js + Node/Express or NestJS). Set up DB (PostgreSQL). Implement user registration, login, JWT auth, and role distinction (driver/passenger).</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p1">ADM-01</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 1–2</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p1">2</div>
+      <div class="step-main">
+        <div class="step-title">Ride creation & listing (driver)</div>
+        <div class="step-desc">Driver can publish a ride with origin, destination, date, time, seats, and price. Ride stored in DB with status. Basic driver dashboard with passenger list.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p1">C-01</span><span class="id-tag tag-p1">C-02</span><span class="id-tag tag-p1">C-03</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 2–3</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p1">3</div>
+      <div class="step-main">
+        <div class="step-title">Search & booking (passenger)</div>
+        <div class="step-desc">Passenger can search rides by city pair + date. Results sorted by relevance. One-click booking with confirmation email/SMS (Twilio or nodemailer).</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p1">P-02</span><span class="id-tag tag-p1">P-03</span><span class="id-tag tag-p1">P-05</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 3–5</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p1">4</div>
+      <div class="step-main">
+        <div class="step-title">Google Maps integration</div>
+        <div class="step-desc">Embed Maps on ride detail page showing full route with waypoints. Show estimated distance & duration via Directions API.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p1">P-04</span><span class="id-tag tag-p1">M-01</span><span class="id-tag tag-p1">M-02</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 5–6</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p1">5</div>
+      <div class="step-main">
+        <div class="step-title">Cash payment & interface toggle</div>
+        <div class="step-desc">Cash confirmation flow in-app. UI mode switcher (classic vs conversational) without losing search state. Admin moderation dashboard stub.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p1">PAY-01</span><span class="id-tag tag-p1">MI-01</span><span class="id-tag tag-p1">ADM-01</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 6–7</div>
+    </div>
+    <button class="start-btn" onclick="sendPrompt('Guide me through Step 1 of Phase 1: project setup and authentication')">Start working on Step 1 ↗</button>
+  </div>
+</div>
+
+<div class="phase" id="p2">
+  <div class="phase-header" onclick="toggle('p2')">
+    <span class="phase-badge p2-badge">Phase 2 · Smart Layer</span>
+    <span class="phase-title">AI chat, real-time tracking & payments</span>
+    <span class="phase-days">Days 8–15</span>
+    <i class="ti ti-chevron-down" id="p2-icon" style="font-size:16px;color:var(--color-text-secondary);transition:transform .2s"></i>
+  </div>
+  <div class="phase-body" id="p2-body" style="display:none">
+    <div class="step">
+      <div class="step-dot dot-p2">1</div>
+      <div class="step-main">
+        <div class="step-title">AI conversational interface</div>
+        <div class="step-desc">NLP entity extraction from French/Arabic/Darija free text (city, date, budget). Integrate an LLM API (Claude/GPT) to parse queries and return structured ride search params. Score & rank results.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p2">P-01</span><span class="id-tag tag-p2">IA-01</span><span class="id-tag tag-p2">IA-02</span><span class="id-tag tag-p2">MI-02</span><span class="id-tag tag-p2">MI-03</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 8–10</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p2">2</div>
+      <div class="step-main">
+        <div class="step-title">Real-time GPS tracking</div>
+        <div class="step-desc">Driver shares live location via WebSocket or Firebase Realtime DB. Passenger sees vehicle position on map during ride. Driver can share tracking link with family.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p2">P-07</span><span class="id-tag tag-p2">C-07</span><span class="id-tag tag-p2">M-03</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 10–12</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p2">3</div>
+      <div class="step-main">
+        <div class="step-title">Booking management</div>
+        <div class="step-desc">Driver validation/refusal flow. Cancellation with policy enforcement. Push notifications (driver ← passenger cancels, passenger ← driver accepts/refuses). Ratings & reviews post-trip.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p2">C-04</span><span class="id-tag tag-p2">C-06</span><span class="id-tag tag-p2">P-08</span><span class="id-tag tag-p2">P-09</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 11–13</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p2">4</div>
+      <div class="step-main">
+        <div class="step-title">CMI card payment & digital receipt</div>
+        <div class="step-desc">Integrate CMI gateway (or Stripe as proxy) for secure card payment. Generate PDF receipt after each transaction. Driver revenue dashboard with trip history.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p2">PAY-02</span><span class="id-tag tag-p2">PAY-03</span><span class="id-tag tag-p2">C-05</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 13–15</div>
+    </div>
+  </div>
+</div>
+
+<div class="phase" id="p3">
+  <div class="phase-header" onclick="toggle('p3')">
+    <span class="phase-badge p3-badge">Phase 3 · Full Product</span>
+    <span class="phase-title">Tourist mode, mobile payments & trust</span>
+    <span class="phase-days">Days 16–20</span>
+    <i class="ti ti-chevron-down" id="p3-icon" style="font-size:16px;color:var(--color-text-secondary);transition:transform .2s"></i>
+  </div>
+  <div class="phase-body" id="p3-body" style="display:none">
+    <div class="step">
+      <div class="step-dot dot-p3">1</div>
+      <div class="step-main">
+        <div class="step-title">Tourist mode & AI destination guide</div>
+        <div class="step-desc">Auto-detect tourist intent in AI chat. Show POIs, restaurants, hotels near destination via Google Places API. AI-generated destination guide (incontournables). Sub-trip planner.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p3">P-06</span><span class="id-tag tag-p3">T-01</span><span class="id-tag tag-p3">T-02</span><span class="id-tag tag-p3">T-03</span><span class="id-tag tag-p3">T-05</span><span class="id-tag tag-p3">IA-03</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 16–17</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p3">2</div>
+      <div class="step-main">
+        <div class="step-title">CashPlus / Inwi Money & driver payout</div>
+        <div class="step-desc">Integrate mobile wallet APIs (CashPlus, Inwi Money). Wire driver payouts to bank account. Trip alerts and recurring ride creation.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p3">PAY-04</span><span class="id-tag tag-p3">PAY-05</span><span class="id-tag tag-p3">P-10</span><span class="id-tag tag-p3">C-08</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 17–18</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p3">3</div>
+      <div class="step-main">
+        <div class="step-title">Trust, safety & AI moderation</div>
+        <div class="step-desc">Driver identity verification (CIN + permis upload). AI anomaly detection for pricing abuse and fake reviews. In-app messaging. Admin abuse tools. AI preference memory.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p3">C-09</span><span class="id-tag tag-p3">P-11</span><span class="id-tag tag-p3">IA-05</span><span class="id-tag tag-p3">IA-06</span><span class="id-tag tag-p3">ADM-03</span><span class="id-tag tag-p3">ADM-04</span>
+        </div>
+      </div>
+      <div class="days-tag">Days 18–19</div>
+    </div>
+    <div class="step">
+      <div class="step-dot dot-p3">4</div>
+      <div class="step-main">
+        <div class="step-title">Polish, testing & launch</div>
+        <div class="step-desc">End-to-end QA, performance audit, real-world ride tests. GPS navigation with live traffic for drivers. Admin stats dashboard. Deploy to production.</div>
+        <div class="step-ids">
+          <span class="id-tag tag-p3">M-04</span><span class="id-tag tag-p3">ADM-02</span><span class="id-tag tag-p3">MI-04</span>
+        </div>
+      </div>
+      <div class="days-tag">Day 20</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const phases = { p1: [7,'bar-p1'], p2: [8,'bar-p2'], p3: [5,'bar-p3'] };
+const tl = document.getElementById('timeline');
+Object.entries(phases).forEach(([,[ days, cls ]]) => {
+  for(let i=0;i<days;i++){
+    const d=document.createElement('div');
+    d.className='tday '+cls;
+    tl.appendChild(d);
+  }
+});
+
+function toggle(id) {
+  const body = document.getElementById(id+'-body');
+  const icon = document.getElementById(id+'-icon');
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  icon.style.transform = hidden ? 'rotate(180deg)' : '';
+}
+</script>

@@ -9,7 +9,7 @@ class Report(Base):
     __tablename__ = "reports"
 
     id          = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    reporter_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    reporter_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     target_type = Column(String(20), nullable=False)  # "ride" | "user"
     target_id   = Column(String, nullable=False)
     reason      = Column(Text, nullable=False)

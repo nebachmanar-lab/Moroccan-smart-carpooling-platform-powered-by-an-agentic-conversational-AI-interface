@@ -628,6 +628,7 @@ export default function DashboardPage() {
     const firstName = user.first_name || "Utilisateur";
     const isDriver = user.role === "DRIVER";
     const isPassenger = user.role === "PASSENGER";
+    const isAdmin = user.role === "ADMIN";
     const confirmedBookings = bookings.filter((b) => b.status === "CONFIRMED" || b.status === "PENDING");
     const pastBookings = bookings.filter((b) => b.status === "CANCELLED");
 
@@ -645,6 +646,11 @@ export default function DashboardPage() {
                         {isDriver && <Link href="/rides/new">Publier un trajet</Link>}
                         {isPassenger && <Link href="/search">Rechercher</Link>}
                         <Link href="/tourist">Tourisme</Link>
+                        {isAdmin && (
+                            <Link href="/admin" style={{ color: "#f59e0b", fontWeight: 700 }}>
+                                ⚙ Admin
+                            </Link>
+                        )}
                         <button
                             className="nav-link-badge-wrap"
                             style={{ background: "none", border: "none", padding: 0, cursor: "pointer", font: "inherit", color: "inherit" }}

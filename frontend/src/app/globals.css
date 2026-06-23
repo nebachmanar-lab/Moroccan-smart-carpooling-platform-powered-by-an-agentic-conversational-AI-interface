@@ -2872,6 +2872,58 @@ html.aurora-active .aurora-soft-light {
     cursor: pointer;
 }
 
+/* ── Admin doc / report list ── */
+.admin-doc-list { display: flex; flex-direction: column; gap: 12px; }
+.admin-doc-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-soft);
+    background: rgba(255,255,255,0.03);
+    flex-wrap: wrap;
+}
+.admin-doc-driver { font-weight: 600; font-size: 14px; margin: 0 0 4px; }
+.admin-doc-meta { font-size: 12px; color: var(--text-muted); margin: 0 0 6px; }
+.admin-doc-link { font-size: 12px; color: var(--blue); text-decoration: none; }
+.admin-doc-link:hover { text-decoration: underline; }
+.admin-doc-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
+.admin-doc-note-input {
+    padding: 5px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border-soft);
+    background: rgba(255,255,255,0.07);
+    color: var(--text-main);
+    font-size: 12px;
+    width: 200px;
+}
+.pending-badge-inline {
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(251,191,36,.15);
+    color: #fbbf24;
+    border: 1px solid rgba(251,191,36,.3);
+}
+
+/* ── Admin ratings list ── */
+.admin-ratings-list { display: flex; flex-direction: column; gap: 10px; }
+.admin-rating-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-soft);
+    background: rgba(255,255,255,0.03);
+    flex-wrap: wrap;
+}
+.admin-rating-stars { font-size: 16px; letter-spacing: 1px; }
+.admin-rating-comment { font-size: 13px; color: var(--text-main); }
+.admin-rating-meta { font-size: 12px; color: var(--text-muted); }
+
 /* ── Driver dashboard tabs ── */
 .driver-tabs {
     display: flex;

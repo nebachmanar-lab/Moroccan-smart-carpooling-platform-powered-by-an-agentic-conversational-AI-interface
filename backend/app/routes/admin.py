@@ -247,6 +247,21 @@ async def list_reports(
     ]
 
 
+@router.delete("/ratings/{rating_id}", status_code=204)
+async def delete_rating(
+    rating_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+):
+    """ADM-04: admin removes a suspicious/fake review."""
+    result = await db.execute(select(Rating).where(Rating.id == rating_id))
+    rating = result.scalar_one_or_none()
+    if not rating:
+        raise HTTPException(status_code=404, detail="Avis introuvable")
+    await db.delete(rating)
+    await db.commit()
+
+
 @router.patch("/reports/{report_id}")
 async def resolve_report(
     report_id: str,

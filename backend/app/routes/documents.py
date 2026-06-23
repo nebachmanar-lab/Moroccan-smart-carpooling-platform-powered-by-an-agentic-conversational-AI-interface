@@ -112,6 +112,12 @@ async def admin_review_document(
         raise HTTPException(status_code=400, detail="Statut invalide")
     if "admin_note" in body:
         doc.admin_note = body["admin_note"]
+    # ADM-03: approving a document marks the driver as verified
+    if doc.status == DocStatus.APPROVED:
+        driver_res = await db.execute(select(User).where(User.id == doc.driver_id))
+        driver = driver_res.scalar_one_or_none()
+        if driver:
+            driver.is_verified = True
     await db.commit()
     return _serialize(doc)
 

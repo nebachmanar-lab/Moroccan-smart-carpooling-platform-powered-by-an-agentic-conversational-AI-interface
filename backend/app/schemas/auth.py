@@ -9,6 +9,7 @@ class UserRegister(BaseModel):
     last_name: str
     email: EmailStr
     password: str
+    phone: Optional[str] = None
     # Must match the Role enum values in models/user.py exactly
     role: Literal["PASSENGER", "DRIVER"] = "PASSENGER"
 
@@ -32,6 +33,7 @@ class UserResponse(BaseModel):
     phone: Optional[str] = None
     role: str
     is_verified: bool = False
+    is_phone_verified: bool = False
 
     class Config:
         from_attributes = True

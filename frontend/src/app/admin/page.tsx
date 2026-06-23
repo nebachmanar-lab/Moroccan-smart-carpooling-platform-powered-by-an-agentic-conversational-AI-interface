@@ -412,7 +412,8 @@ export default function AdminPage() {
                             <div className="section-header">
                                 <h2>Avis ({ratings.length})</h2>
                                 <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "4px 0 0" }}>
-                                    Les avis ≤ 2 étoiles sans commentaire sont signalés comme potentiellement suspects.
+                                    Détection basique : avis ≤ 2 étoiles sans commentaire → badge ⚠ Suspect.
+                                    La détection automatisée par IA (IA-06) n&apos;est pas encore implémentée — la modération reste manuelle.
                                 </p>
                             </div>
                             {ratings.length === 0 ? (

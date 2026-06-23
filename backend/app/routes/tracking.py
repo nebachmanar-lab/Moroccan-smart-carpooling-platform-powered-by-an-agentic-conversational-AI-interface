@@ -5,6 +5,17 @@ Flow:
   Driver  → connects as role=driver  → sends {lat, lng, speed?, heading?}
   Watcher → connects as role=watcher → receives driver location broadcasts
             Can auth with JWT token OR a share_token (no account required) — C-09
+
+IMPLEMENTED (M-03):
+  - Driver broadcasts live position to all connected passengers/watchers.
+  - Public share link (no login required) via one-time share token.
+  - Leaflet map on the frontend updates in real time.
+
+NOT IMPLEMENTED (M-04 — GPS navigation for drivers):
+  - Turn-by-turn navigation for the driver is not implemented.
+  - Leaflet does not natively support routing/navigation; this would require
+    integrating a routing engine such as OSRM or GraphHopper.
+  - Scope was deferred — planned for a future phase.
 """
 import json
 import logging

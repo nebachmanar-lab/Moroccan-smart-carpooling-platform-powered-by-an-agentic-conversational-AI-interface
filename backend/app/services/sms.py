@@ -82,6 +82,15 @@ def send_booking_cancellation_sms(
     return _send(to_phone, body)
 
 
+def send_phone_otp_sms(to_phone: str, otp: str, first_name: str) -> bool:
+    body = (
+        f"CovoitMaroc — Bonjour {first_name} !\n"
+        f"Votre code de vérification : {otp}\n"
+        f"Ce code expire dans 10 minutes. Ne le partagez pas."
+    )
+    return _send(to_phone, body)
+
+
 def send_ride_published_sms(
     to_phone: str,
     origin: str,

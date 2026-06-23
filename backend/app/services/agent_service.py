@@ -2,6 +2,18 @@
 Agentic AI copilot service.
 Uses Groq's function-calling API so the LLM orchestrates real app tools
 instead of generating freeform intents.
+
+IMPLEMENTED:
+  30+ tools covering search, booking, ride publication, ratings, alerts,
+  reports, GPS share links, preferences, and tourist information.
+  Full Darija/French bilingual support via Groq Llama-3.3-70B.
+
+NOT IMPLEMENTED (IA-06 — Automated anomaly detection):
+  Automated detection of abnormal prices or fake reviews by the AI agent
+  is not implemented. The admin dashboard flags suspicious ratings with a
+  simple rule (stars ≤ 2 and no comment), but there is no ML-based or
+  LLM-based anomaly detection pipeline. This was planned for Phase 3 and
+  deferred due to time constraints.
 """
 import json
 from datetime import date, timedelta

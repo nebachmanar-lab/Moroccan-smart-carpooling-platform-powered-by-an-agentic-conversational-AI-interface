@@ -1,5 +1,8 @@
 # app/routes/auth.py
 import uuid
+import random
+import string
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
@@ -22,6 +25,17 @@ from app.services.email import (
     send_verification_email,
     send_reset_password_email,
 )
+from app.services.sms import send_phone_otp_sms
+
+# In-memory OTP store: phone_number → (otp_code, expires_at)
+# On a production system this would live in Redis or the database.
+_phone_otps: dict[str, tuple[str, datetime]] = {}
+
+OTP_EXPIRE_MINUTES = 10
+
+
+def _generate_otp() -> str:
+    return "".join(random.choices(string.digits, k=6))
 
 
 class RefreshRequest(BaseModel):
@@ -41,6 +55,10 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
+class VerifyPhoneRequest(BaseModel):
+    phone: str
+    otp: str
+
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -55,18 +73,26 @@ async def register(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email déjà utilisé.")
 
+    if user_in.phone:
+        phone_taken = await db.execute(select(User).where(User.phone == user_in.phone))
+        if phone_taken.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Numéro de téléphone déjà utilisé.")
+
     user = User(
         id=str(uuid.uuid4()),
         first_name=user_in.first_name,
         last_name=user_in.last_name,
         email=user_in.email,
+        phone=user_in.phone or None,
         password_hash=await hash_password_async(user_in.password),
         role=user_in.role,
         is_verified=False,
+        is_phone_verified=False,
     )
     db.add(user)
     await db.commit()
 
+    # Email verification
     token = create_one_time_token(user.id, "verify_email", expire_hours=24)
     verify_url = f"{settings.FRONTEND_URL}/auth/verify-email?token={token}"
     background_tasks.add_task(
@@ -76,7 +102,72 @@ async def register(
         verify_url=verify_url,
     )
 
+    # Phone OTP — triggered only when a phone number is provided
+    if user_in.phone:
+        otp = _generate_otp()
+        expires_at = datetime.utcnow() + timedelta(minutes=OTP_EXPIRE_MINUTES)
+        _phone_otps[user_in.phone] = (otp, expires_at)
+        background_tasks.add_task(
+            send_phone_otp_sms,
+            to_phone=user_in.phone,
+            otp=otp,
+            first_name=user.first_name,
+        )
+
     return user
+
+
+@router.post("/verify-phone")
+async def verify_phone(
+    body: VerifyPhoneRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify a phone number with the 6-digit OTP sent by SMS at registration."""
+    entry = _phone_otps.get(body.phone)
+    if not entry:
+        raise HTTPException(status_code=400, detail="Aucun code en attente pour ce numéro.")
+
+    otp_code, expires_at = entry
+    if datetime.utcnow() > expires_at:
+        _phone_otps.pop(body.phone, None)
+        raise HTTPException(status_code=400, detail="Code expiré. Demandez un nouveau code.")
+
+    if body.otp != otp_code:
+        raise HTTPException(status_code=400, detail="Code incorrect.")
+
+    # Mark phone as verified
+    result = await db.execute(select(User).where(User.phone == body.phone))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+
+    user.is_phone_verified = True
+    await db.commit()
+    _phone_otps.pop(body.phone, None)
+    return {"message": "Numéro de téléphone vérifié avec succès."}
+
+
+@router.post("/resend-phone-otp")
+async def resend_phone_otp(
+    body: VerifyPhoneRequest,  # only uses body.phone
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-send a new OTP to the given phone number."""
+    result = await db.execute(select(User).where(User.phone == body.phone))
+    user = result.scalar_one_or_none()
+    # Return 200 regardless to prevent phone number enumeration
+    if user and not user.is_phone_verified:
+        otp = _generate_otp()
+        expires_at = datetime.utcnow() + timedelta(minutes=OTP_EXPIRE_MINUTES)
+        _phone_otps[body.phone] = (otp, expires_at)
+        background_tasks.add_task(
+            send_phone_otp_sms,
+            to_phone=body.phone,
+            otp=otp,
+            first_name=user.first_name,
+        )
+    return {"message": "Si ce numéro est enregistré et non vérifié, un nouveau code a été envoyé."}
 
 
 @router.post("/verify-email")

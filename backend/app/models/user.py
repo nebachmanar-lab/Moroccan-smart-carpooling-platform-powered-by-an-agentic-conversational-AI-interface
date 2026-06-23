@@ -23,6 +23,7 @@ class User(Base):
     role: Mapped[Role] = mapped_column(Enum(Role), default=Role.PASSENGER)
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

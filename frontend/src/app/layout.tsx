@@ -1,9 +1,9 @@
-import "./globals.css";
+﻿import "./globals.css";
 import "leaflet/dist/leaflet.css";
 import CursorAurora from "@/components/CursorAurora";
 
 export const metadata = {
-    title: "Covoit Maroc",
+    title: "CovoMar",
     description: "Moroccan intelligent carpooling platform",
 };
 

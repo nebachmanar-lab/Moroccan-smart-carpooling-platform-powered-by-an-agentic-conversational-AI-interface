@@ -15,6 +15,7 @@ NOT IMPLEMENTED (IA-06 — Automated anomaly detection):
   LLM-based anomaly detection pipeline. This was planned for Phase 3 and
   deferred due to time constraints.
 """
+import asyncio
 import json
 from datetime import date, timedelta
 
@@ -36,7 +37,7 @@ from . import agent_tools as tools
 from .agent_tools import TOOL_DEFINITIONS
 from .booking import create_booking
 
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "llama-3.1-8b-instant"
 MAX_TOOL_ITERATIONS = 6
 
 
@@ -75,133 +76,76 @@ async def _get_user_top_routes(user: User, db: AsyncSession) -> str:
         return ""
 
 
+_DRIVER_ONLY = {
+    "get_my_rides", "get_driver_bookings", "prepare_publish_ride",
+    "prepare_cancel_ride", "prepare_edit_ride", "rate_passenger_by_driver",
+    "get_tracking_share_link", "get_user_preferences", "save_custom_note",
+    "prepare_set_recurring",
+    # new driver-only tools:
+    "get_ride_passengers", "prepare_accept_booking", "prepare_refuse_booking",
+    "prepare_send_message_to_passenger", "get_driver_revenue_summary",
+    "get_my_driver_documents",
+}
+
+_PASSENGER_ONLY = {
+    "get_my_bookings", "prepare_cancel_booking", "prepare_booking",
+    "get_driver_profile", "get_booking_messages", "prepare_send_message",
+    "get_tracking_for_booking", "get_my_alerts", "create_search_alert",
+    "delete_search_alert", "submit_rating", "get_tourist_info",
+    "get_payment_methods", "prepare_report",
+}
+
+
 async def _system_prompt(user: User, db: AsyncSession) -> str:
     today = date.today()
     tomorrow = today + timedelta(days=1)
     role = user.role.value if hasattr(user.role, "value") else str(user.role)
     top_routes = await _get_user_top_routes(user, db)
+    weekend = today + timedelta(days=(5 - today.weekday()) % 7 + 1)
 
-    return f"""You are Rafi, the AI copilot of CovoitMaroc — the Moroccan carpooling platform.
-You are NOT a chatbot. You are an intelligent app controller that uses tools to orchestrate real features.
+    if role == "DRIVER":
+        return f"""You are Rafi, AI copilot of CovoMar for DRIVER {user.first_name} {user.last_name}.
 
-Current user: {user.first_name} {user.last_name} | Role: {role}
-Today: {today}. Tomorrow: {tomorrow}.{top_routes}
+Today: {today} | demain={tomorrow} | weekend={weekend}{top_routes}
+Cities: kaza/casa→Casablanca, rbat→Rabat, fas→Fès, mrrakch→Marrakech, tnja→Tanger, meknas→Meknès, wjda→Oujda, agadir→Agadir, tet→Tétouan, lgdida→El Jadida
 
-## Available tools — use the right one for each action
+Tool-calling rules — you have no internal knowledge of user data:
+- For rides: call get_my_rides. For bookings: call get_driver_bookings. For revenue: call get_driver_revenue_summary. For documents: call get_my_driver_documents. For preferences: call get_user_preferences.
+- For tourist info (hotels, hébergements, restaurants, attractions, que voir, activities, tourism): call get_tourist_info with the city name. NEVER call get_my_rides for tourist questions.
+- When the user activates "mode touristique" or asks to switch to tourist mode: respond with a generic welcome message ("Mode touristique activé. Quelle ville souhaitez-vous explorer ?") — do NOT assume or mention any specific city.
+- Call ONE tool, get the result, then respond. Do not chain multiple tools unless the user explicitly asked for several things.
+- Never invent numbers, ride IDs, prices, or status values.
 
-### SEARCH & INFO (both roles)
-- search_rides(from_city, to_city, date?, seats?, max_price?, time_of_day?) → find rides
-- get_ride_details(ride_id) → full detail of ONE specific ride (use real UUID only)
-- estimate_distance_duration(from_city, to_city) → distance & travel time
-- check_seat_availability(ride_id, seats_needed?) → availability check
-- get_tourist_info(destination) → tourist tips for a city
-- get_payment_methods() → available payment options
+Action rules:
+- prepare_* tools (prepare_update_preferences, prepare_publish_ride, prepare_cancel_ride, etc.): call first, wait for user confirmation before executing.
+- rate_passenger_by_driver: execute directly, no confirmation.
+- To show preferences: call get_user_preferences — the UI card lets the user toggle values directly.
+- When the driver describes personal rules or preferences in text (e.g. punctuality, no food, rest stops): call save_custom_note with their exact words.
+- When the driver wants to mark a ride as "trajet habituel" or set recurring days: call get_my_rides to show the ride list — each card has an "Habitualiser" checkbox the driver can use directly. Do NOT call prepare_set_recurring.
+- Convert relative dates (demain/ghdwa={tomorrow}, lyoum={today}, weekend={weekend}) to YYYY-MM-DD.
+- For prepare_publish_ride: departure_date (YYYY-MM-DD) and departure_time (HH:MM) are separate params.
+- Only access your own rides, bookings, passengers, documents.
+- Never give admin access or validate your own documents.
 
-### PASSENGER actions
-- get_my_bookings() → list of MY reservations
-- prepare_booking(ride_id, seats?) → show booking summary + ask confirmation (does NOT book yet)
-  ⚠️ Cannot book your own ride (you are the driver of it)
-- prepare_cancel_booking(booking_id) → show cancel summary + ask confirmation
-- submit_rating(ride_id, stars, comment?) → rate a driver after a COMPLETED ride (1–5 stars)
-- get_my_alerts() → list active search alerts
-- create_search_alert(origin, destination) → get email when a matching ride is published
-- delete_search_alert(alert_id) → remove a search alert
+Language: Detect French/Darija/Arabic, always reply in same language. Be concise."""
+    else:
+        return f"""You are Rafi, the AI copilot of CovoMar (Moroccan carpooling). You control app features via tools — never invent data.
 
-### DRIVER actions
-- get_my_rides() → list of MY published rides
-- get_driver_bookings(ride_id?) → see who booked my rides
-- prepare_publish_ride(origin, destination, departure_date, departure_time, seats, price_per_seat, pickup_location?, dropoff_location?) → show publish summary + ask confirmation
-- prepare_cancel_ride(ride_id) → show cancel summary + ask confirmation
-- prepare_edit_ride(ride_id, price_per_seat?, available_seats?, departure_time?, pickup_location?, dropoff_location?) → modify a ride + ask confirmation
-- get_user_preferences() → view my current preferences
-- update_preferences(smoking_allowed?, pets_allowed?, music_allowed?, air_conditioning?, talking_preference?, luggage_size?) → update preferences immediately (no confirmation needed)
-- rate_passenger_by_driver(ride_id, passenger_id, stars, comment?) → rate a passenger after a COMPLETED ride
-- get_tracking_share_link(ride_id) → get a public GPS tracking URL to share with family
+User: {user.first_name} {user.last_name} | Role: {role} | Today: {today}{top_routes}
+Dates: demain/ghdwa={tomorrow}, lyoum={today}, ce weekend={weekend}. Convert all relative dates to YYYY-MM-DD before tool calls.
+Cities (Darija→standard): kaza/casa→Casablanca, rbat→Rabat, fas→Fès, mrrakch→Marrakech, tnja→Tanger, meknas→Meknès, wjda→Oujda, agadir→Agadir, tet→Tétouan, lgdida→El Jadida
 
-### BOTH ROLES
-- get_driver_ratings(driver_id) → view ratings & reviews for any driver
-- prepare_report(target_type, target_id, reason) → report a ride or user to moderators + ask confirmation
+Rules:
+1. Always call a tool via the tool-calling API — NEVER write <function=...> syntax in your text reply.
+2. Never invent rides, prices, or statuses — only return what tools return.
+3. prepare_* tools (booking/publish/cancel/edit/report/send_message): call first, then wait for user confirmation.
+4. submit_rating, rate_passenger_by_driver, create_search_alert, delete_search_alert, update_preferences: execute directly, no confirmation.
+5. Ask for missing required info before calling a tool.
+6. PASSENGER cannot publish rides. DRIVER can book rides as passenger.
+7. For tourist info (hotels, hébergements, restaurants, attractions, que voir, activities): call get_tourist_info with the city name.
+8. When the user activates "mode touristique": respond "Mode touristique activé. Quelle ville souhaitez-vous explorer ?" — do NOT assume any specific city.
 
-## Rules
-1. ALWAYS call a tool — never invent data, prices, or statuses.
-2. For booking/publishing/cancellation/editing/reporting: use the prepare_* tool first. Wait for user confirmation.
-3. submit_rating, rate_passenger_by_driver, create_search_alert, delete_search_alert, update_preferences — execute directly without extra confirmation.
-4. If required info is missing for a tool call, ask for it before calling.
-5. A driver CAN also search and book rides as a passenger (they travel too).
-6. A passenger CANNOT publish rides.
-
-## Date handling
-- "demain" / "ghdwa" / "غدا" = {tomorrow}
-- "ce weekend" / "had weekend" = next Saturday = {today + timedelta(days=(5 - today.weekday()) % 7 + 1)}
-- "lyoum" / "اليوم" = today = {today}
-- "jemaa" / "ljoumoa" = Friday, "sebt" = Saturday, "had" = Sunday
-- Always convert relative dates to YYYY-MM-DD before calling search_rides() or prepare_publish_ride().
-
-## Language & Darija
-You MUST understand Moroccan Darija (dialect). Detect the language and ALWAYS reply in the SAME language/dialect the user wrote in.
-
-### Darija travel vocabulary
-- bghit nmchi / bghit nsafar / bghit nroh = I want to travel
-- fayn / fin / wfayn = where (destination)
-- mn fayn / mn fin = from where (origin)
-- chhal / bchhal = how much (price)
-- chhal mn place / chhal mn mkan = how many seats
-- wach kayn / wach fih = is there (availability)
-- nhar / yom = day
-- sa3a / lwa9t = time / hour
-- had ssafra / had lkra = this trip
-- l9itu / l9ina = I found / we found
-- 7jz / 7ajz / 7ajzli = book / book for me
-- nchri / nchouf = I'll buy / let me see
-- b7al / bhal = like / approximately
-- mzyane / zwine = good / nice
-- ghalya / ghalia = expensive
-- rkhisa / rkhis = cheap
-- kayn / kayna = there is / available
-- machi / mazal machi = going / not yet going
-- daba = now / right now
-- m3a = with
-- bla = without
-- ndir / dir = I will do / do
-- 3tini / 3tini = give me
-- shof / chouf = show / look
-
-### Darija city names → standard names for tools
-Use the STANDARD French name when calling tools:
-- "kaza" / "casa" / "Dar Lbida" / "دار البيضاء" → "Casablanca"
-- "rbat" / "Rbat" / "الرباط" → "Rabat"
-- "fas" / "Fes" / "فاس" → "Fès"
-- "mrrakch" / "Mrakch" / "مراكش" → "Marrakech"
-- "tnja" / "Tanja" / "طنجة" → "Tanger"
-- "3sbanya lmghrib" / "Tet" / "تطوان" → "Tétouan"
-- "l3youne" / "العيون" → "Laâyoune"
-- "wjda" / "Wujda" / "وجدة" → "Oujda"
-- "meknas" / "Meknas" / "مكناس" → "Meknès"
-- "lgdida" / "الجديدة" → "El Jadida"
-- "safi" / "آسفي" → "Safi"
-- "bni mlal" / "بني ملال" → "Béni Mellal"
-- "khnifrа" / "خنيفرة" → "Khénifra"
-- "agadir" / "أكادير" → "Agadir"
-- "warzazat" / "ورزازات" → "Ouarzazate"
-- "shfshawn" / "Chaouen" / "شفشاون" → "Chefchaouen"
-
-### Darija number words
-- wahed = 1, jouj/zouj = 2, tlata = 3, rb3a = 4, khmsa = 5, stta = 6, sb3a = 7, tmnya = 8
-- 3shrin = 20, tlatin = 30, rb3in = 40, miya = 100
-
-## Response style
-- Be concise in text — the UI renders visual cards for rides/maps/bookings. Don't describe what the cards already show.
-- After a search, briefly explain the best option and why (price, availability, timing).
-- Ask targeted follow-up questions if key info is missing (date, destination).
-- NEVER confirm a booking without calling prepare_booking() first.
-- NEVER make up data — all information must come from tool results.
-- When the user writes in Darija, reply in Darija. When in French, reply in French. When in Arabic (فصحى), reply in Arabic.
-
-## Important rules
-- PASSENGER cannot publish rides.
-- DRIVER can search for rides as a passenger but mainly manages their own rides.
-- Sensitive actions (booking, publishing) ALWAYS require explicit user confirmation through the UI.
-"""
+Language: Detect French/Darija/Arabic and always reply in the same language. The UI shows visual cards — be concise, don't describe what cards already show."""
 
 
 # ---------------------------------------------------------------------------
@@ -234,10 +178,12 @@ async def _execute_tool(name: str, args: dict, user: User, db: AsyncSession) -> 
             return await tools.prepare_cancel_booking(db, args["booking_id"], user)
         if name == "prepare_cancel_ride":
             return await tools.prepare_cancel_ride(db, args["ride_id"], user)
-        if name == "update_preferences":
-            return await tools.update_preferences(db, user, **args)
         if name == "get_user_preferences":
             return await tools.get_user_preferences(db, user)
+        if name == "save_custom_note":
+            return await tools.save_custom_note(db, user, args["note"])
+        if name == "prepare_set_recurring":
+            return await tools.prepare_set_recurring(db, user, args["ride_id"])
         if name == "prepare_publish_ride":
             return await tools.prepare_publish_ride(user=user, **args)
         if name == "get_tourist_info":
@@ -269,6 +215,18 @@ async def _execute_tool(name: str, args: dict, user: User, db: AsyncSession) -> 
             )
         if name == "get_tracking_share_link":
             return await tools.get_tracking_share_link(db, user, args["ride_id"])
+        if name == "get_ride_passengers":
+            return await tools.get_ride_passengers(db, args["ride_id"], user)
+        if name == "prepare_accept_booking":
+            return await tools.prepare_accept_booking(db, args["booking_id"], user)
+        if name == "prepare_refuse_booking":
+            return await tools.prepare_refuse_booking(db, args["booking_id"], user)
+        if name == "prepare_send_message_to_passenger":
+            return await tools.prepare_send_message_to_passenger(db, args["booking_id"], args["content"], user)
+        if name == "get_driver_revenue_summary":
+            return await tools.get_driver_revenue_summary(db, user)
+        if name == "get_my_driver_documents":
+            return await tools.get_my_driver_documents(db, user)
         return {"error": f"Unknown tool: {name}"}
     except Exception as exc:
         return {"error": str(exc)}
@@ -424,6 +382,68 @@ async def agent_chat(
         except Exception as exc:
             return AgentResponse(reply=f"Erreur lors de la modification : {exc}", ui_action="error")
 
+    if confirmed and pending_action and pending_action.get("action") == "accept_booking":
+        s = pending_action.get("summary", {})
+        booking_id = s.get("booking_id")
+        try:
+            b_res = await db.execute(
+                select(Booking).options(joinedload(Booking.ride))
+                .where(Booking.id == booking_id)
+            )
+            booking = b_res.scalar_one_or_none()
+            if not booking or (booking.ride and booking.ride.driver_id != user.id):
+                return AgentResponse(reply="Réservation introuvable ou accès non autorisé.", ui_action="error")
+            booking.status = BookingStatus.CONFIRMED
+            await db.commit()
+            return AgentResponse(
+                reply=f"Réservation de {s.get('passenger_name')} acceptée pour {s.get('origin')} → {s.get('destination')}.",
+                ui_action="booking_accepted",
+                data={"booking_id": booking_id, "passenger_name": s.get("passenger_name")},
+            )
+        except Exception as exc:
+            return AgentResponse(reply=f"Erreur : {exc}", ui_action="error")
+
+    if confirmed and pending_action and pending_action.get("action") == "refuse_booking":
+        s = pending_action.get("summary", {})
+        booking_id = s.get("booking_id")
+        try:
+            b_res = await db.execute(
+                select(Booking).options(joinedload(Booking.ride))
+                .where(Booking.id == booking_id)
+            )
+            booking = b_res.scalar_one_or_none()
+            if not booking or (booking.ride and booking.ride.driver_id != user.id):
+                return AgentResponse(reply="Réservation introuvable ou accès non autorisé.", ui_action="error")
+            booking.status = BookingStatus.CANCELLED
+            if booking.ride:
+                booking.ride.available_seats += booking.seats_booked
+            await db.commit()
+            return AgentResponse(
+                reply=f"Réservation de {s.get('passenger_name')} refusée. {booking.seats_booked} place(s) remises disponibles.",
+                ui_action="booking_refused",
+                data={"booking_id": booking_id, "passenger_name": s.get("passenger_name")},
+            )
+        except Exception as exc:
+            return AgentResponse(reply=f"Erreur : {exc}", ui_action="error")
+
+    if confirmed and pending_action and pending_action.get("action") == "send_message_to_passenger":
+        from ..models.message import DirectMessage
+        s = pending_action.get("summary", {})
+        booking_id = s.get("booking_id")
+        content = s.get("content", "")
+        try:
+            import uuid as _uuid_mod
+            msg = DirectMessage(id=str(_uuid_mod.uuid4()), booking_id=booking_id, sender_id=user.id, content=content)
+            db.add(msg)
+            await db.commit()
+            return AgentResponse(
+                reply=f"Message envoyé à {s.get('passenger_name', 'le passager')} : « {content} »",
+                ui_action="message_sent",
+                data={"booking_id": booking_id, "content": content},
+            )
+        except Exception as exc:
+            return AgentResponse(reply=f"Erreur lors de l'envoi : {exc}", ui_action="error")
+
     if confirmed and pending_action and pending_action.get("action") == "create_booking":
         ride_id = pending_action["ride_id"]
         seats = pending_action.get("seats", 1)
@@ -457,9 +477,68 @@ async def agent_chat(
             return AgentResponse(reply=f"Erreur lors de la réservation : {exc}", ui_action="error")
 
     # -----------------------------------------------------------------------
+    # Fast-path: tourist info — call directly without LLM to avoid tool_use_failed
+    # -----------------------------------------------------------------------
+    _CITY_ALIASES: dict[str, str] = {
+        "casablanca": "Casablanca", "casa": "Casablanca", "kaza": "Casablanca",
+        "rabat": "Rabat", "rbat": "Rabat",
+        "fes": "Fès", "fas": "Fès", "fès": "Fès",
+        "marrakech": "Marrakech", "mrrakch": "Marrakech",
+        "tanger": "Tanger", "tnja": "Tanger",
+        "agadir": "Agadir",
+        "tetouan": "Tétouan", "tétouan": "Tétouan", "tet": "Tétouan",
+        "chefchaouen": "Chefchaouen",
+        "ouarzazate": "Ouarzazate",
+        "meknes": "Meknès", "meknès": "Meknès", "meknas": "Meknès",
+        "el jadida": "El Jadida", "lgdida": "El Jadida",
+        "oujda": "Oujda", "wjda": "Oujda",
+        "essaouira": "Essaouira",
+        "ifrane": "Ifrane",
+    }
+    _TOURIST_KEYWORDS = (
+        "heberg", "hotel", "restaurant", "voir", "visit", "attraction",
+        "touristique", "tourist", "activit", "discover", "explorer",
+        "riads", "médina", "medina", "sortir", "recommand",
+    )
+    if messages:
+        last_msg = messages[-1].content.strip().lower()
+        # Detect city name (standalone or with tourist keywords)
+        detected_city: str | None = None
+        for alias, canonical in _CITY_ALIASES.items():
+            if alias in last_msg:
+                detected_city = canonical
+                break
+        # Trigger fast-path if: message is just a city name OR contains tourist keyword
+        if detected_city:
+            is_pure_city = last_msg in _CITY_ALIASES
+            has_tourist_kw = any(kw in last_msg for kw in _TOURIST_KEYWORDS)
+            # Also check if previous assistant msg asked for a city (tourist mode context)
+            prev_assistant_msgs = [m.content.lower() for m in messages[:-1] if m.role == "assistant"]
+            tourist_context = any(
+                any(kw in m for kw in ("ville", "explorer", "touristique", "souhaitez-vous"))
+                for m in prev_assistant_msgs
+            )
+            if is_pure_city or has_tourist_kw or tourist_context:
+                result = tools.get_tourist_info(detected_city)
+                if result.get("found"):
+                    return AgentResponse(
+                        reply=f"Voici les informations touristiques pour **{detected_city}** :",
+                        ui_action="tourist_info",
+                        data={"tourist_info": result},
+                    )
+
+    # -----------------------------------------------------------------------
     # Normal agentic loop
     # -----------------------------------------------------------------------
     client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+
+    _role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if _role == "PASSENGER":
+        active_tools = [t for t in TOOL_DEFINITIONS if t["function"]["name"] not in _DRIVER_ONLY]
+    elif _role == "DRIVER":
+        active_tools = [t for t in TOOL_DEFINITIONS if t["function"]["name"] not in _PASSENGER_ONLY]
+    else:
+        active_tools = TOOL_DEFINITIONS
 
     llm_messages: list[dict] = [
         {"role": "system", "content": await _system_prompt(user, db)},
@@ -468,22 +547,62 @@ async def agent_chat(
 
     accumulated_data: dict = {}
     ui_action = "none"
+    _tool_use_failed_retried = False
 
     for _iteration in range(MAX_TOOL_ITERATIONS):
         try:
-            response = await client.chat.completions.create(
-                model=MODEL,
-                messages=llm_messages,
-                tools=TOOL_DEFINITIONS,
-                tool_choice="auto",
-                temperature=0.3,
-                max_tokens=1024,
-            )
+            _last_exc: Exception | None = None
+            for _attempt in range(3):
+                try:
+                    response = await client.chat.completions.create(
+                        model=MODEL,
+                        messages=llm_messages,
+                        tools=active_tools,
+                        tool_choice="auto",
+                        temperature=0.3,
+                        max_tokens=1024,
+                    )
+                    break
+                except Exception as _exc:
+                    _last_exc = _exc
+                    err_str = str(_exc)
+                    # Only retry on RPM/TPM rate limits (not daily quota exhaustion)
+                    is_429 = "429" in err_str
+                    is_daily = any(k in err_str.lower() for k in ("daily", "quota", "exceeded your current quota", "organization"))
+                    if is_429 and not is_daily and _attempt < 2:
+                        await asyncio.sleep(5 * (2 ** _attempt))  # 5s, 10s
+                        continue
+                    raise
+            else:
+                raise _last_exc  # type: ignore[misc]
         except Exception as exc:
             err = str(exc)
+            is_daily = any(k in err.lower() for k in ("daily", "quota", "exceeded your current quota", "organization"))
             if "429" in err:
+                if is_daily:
+                    return AgentResponse(
+                        reply="Le quota journalier de l'IA est atteint. Réessayez demain ou changez la clé API Groq dans le fichier `.env`.",
+                        ui_action="error",
+                    )
                 return AgentResponse(
-                    reply="Quota Groq dépassé. Attendez quelques secondes et réessayez.",
+                    reply="Trop de requêtes en ce moment. Attendez quelques secondes et réessayez.",
+                    ui_action="error",
+                )
+            # 400 tool_use_failed — model wrote <function=...> text instead of proper tool call
+            if "400" in err and ("tool_use_failed" in err or "failed_generation" in err):
+                if not _tool_use_failed_retried:
+                    _tool_use_failed_retried = True
+                    llm_messages.append({
+                        "role": "system",
+                        "content": (
+                            "IMPORTANT: Use the tool-calling API (function call blocks). "
+                            "NEVER write <function=...> or <function_calls> syntax in your text reply. "
+                            "Retry the user's last request using a proper tool call."
+                        ),
+                    })
+                    continue  # retry with corrective instruction
+                return AgentResponse(
+                    reply="Je n'ai pas pu traiter votre demande. Reformulez et réessayez.",
                     ui_action="error",
                 )
             return AgentResponse(reply=f"Erreur IA : {exc}", ui_action="error")
@@ -491,7 +610,15 @@ async def agent_chat(
         choice = response.choices[0]
 
         # LLM finished — return final text response
-        if choice.finish_reason == "stop":
+        if choice.finish_reason in ("stop", "end_turn"):
+            return AgentResponse(
+                reply=choice.message.content or "...",
+                ui_action=ui_action,
+                data=accumulated_data or None,
+            )
+
+        # Unexpected finish reason (e.g. "length") — return whatever we have
+        if choice.finish_reason not in ("tool_calls", "function_call"):
             return AgentResponse(
                 reply=choice.message.content or "...",
                 ui_action=ui_action,
@@ -499,7 +626,7 @@ async def agent_chat(
             )
 
         # LLM wants to call tools
-        if choice.finish_reason == "tool_calls":
+        if choice.finish_reason in ("tool_calls", "function_call"):
             # Add assistant message (with tool_calls) to history
             llm_messages.append({
                 "role": "assistant",
@@ -632,6 +759,39 @@ async def agent_chat(
                         pending_action={"action": "edit_ride", "summary": s},
                     )
 
+                if tool_result.get("confirm_required") and tool_result.get("action") == "accept_booking":
+                    summary = tool_result["summary"]
+                    dt_str = summary["departure_time"][:16].replace("T", " à ")
+                    return AgentResponse(
+                        reply=f"Confirmer l'acceptation de la réservation de {summary['passenger_name']} ?\n🚗 {summary['origin']} → {summary['destination']}\n📅 {dt_str}\n💺 {summary['seats']} place(s) · {summary['total_price']:.0f} MAD",
+                        ui_action="show_accept_booking_summary",
+                        data={"accept_summary": summary},
+                        needs_confirmation=True,
+                        pending_action={"action": "accept_booking", "summary": summary},
+                    )
+
+                if tool_result.get("confirm_required") and tool_result.get("action") == "refuse_booking":
+                    summary = tool_result["summary"]
+                    dt_str = summary["departure_time"][:16].replace("T", " à ")
+                    return AgentResponse(
+                        reply=f"Confirmer le refus de la réservation de {summary['passenger_name']} ?\n🚗 {summary['origin']} → {summary['destination']}\n📅 {dt_str}\n💺 {summary['seats']} place(s)\n\n⚠️ Les places seront remises disponibles.",
+                        ui_action="show_refuse_booking_summary",
+                        data={"refuse_summary": summary},
+                        needs_confirmation=True,
+                        pending_action={"action": "refuse_booking", "summary": summary},
+                    )
+
+                if tool_result.get("confirm_required") and tool_result.get("action") == "send_message_to_passenger":
+                    summary = tool_result["summary"]
+                    passenger_name = summary.get("passenger_name", "le passager")
+                    return AgentResponse(
+                        reply=f"Envoyer ce message à {passenger_name} ?\n\n« {summary['content']} »",
+                        ui_action="show_message_preview",
+                        data={"message_preview": summary},
+                        needs_confirmation=True,
+                        pending_action={"action": "send_message_to_passenger", "summary": summary},
+                    )
+
                 # Track which UI components to render
                 if name == "search_rides" and not tool_result.get("error"):
                     ui_action = "show_rides"
@@ -656,6 +816,42 @@ async def agent_chat(
                 elif name == "prepare_publish_ride" and tool_result.get("error"):
                     # Error from validation (not a driver, bad date, etc.) — no special UI needed
                     pass
+                elif name == "get_my_rides":
+                    ui_action = "driver_rides"
+                    rides = tool_result.get("rides", [])
+                    accumulated_data["rides"] = rides
+                    count = len(rides)
+                    if count == 0:
+                        reply = "Vous n'avez aucun trajet publié pour le moment."
+                    elif count == 1:
+                        reply = "Voici votre trajet publié :"
+                    else:
+                        reply = f"Voici vos {count} trajets publiés :"
+                    return AgentResponse(reply=reply, ui_action=ui_action, data=dict(accumulated_data))
+                elif name == "get_ride_passengers" and not tool_result.get("error"):
+                    ui_action = "driver_ride_passengers"
+                    accumulated_data["passengers"] = tool_result
+                elif name == "get_driver_bookings":
+                    ui_action = "driver_bookings"
+                    accumulated_data["bookings"] = tool_result.get("bookings", [])
+                elif name == "get_driver_revenue_summary":
+                    ui_action = "driver_revenue"
+                    accumulated_data["revenue"] = tool_result
+                elif name == "get_my_driver_documents":
+                    ui_action = "driver_documents"
+                    accumulated_data["documents"] = tool_result
+                elif name == "get_user_preferences" and not tool_result.get("error"):
+                    ui_action = "driver_preferences"
+                    accumulated_data["preferences"] = tool_result
+                elif name == "save_custom_note" and not tool_result.get("error"):
+                    ui_action = "driver_preferences"
+                    accumulated_data["preferences"] = tool_result
+                elif name == "prepare_set_recurring" and not tool_result.get("error"):
+                    ui_action = "driver_set_recurring"
+                    accumulated_data["recurring_ride"] = tool_result
+                elif name == "get_tracking_share_link" and tool_result.get("success"):
+                    ui_action = "tracking_share_link"
+                    accumulated_data["share_url"] = tool_result.get("share_url", "")
 
                 # Feed result back to LLM
                 llm_messages.append({

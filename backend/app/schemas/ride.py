@@ -38,8 +38,11 @@ class RideUpdate(BaseModel):
     price_per_seat: Optional[float] = None
     pickup_location: Optional[str] = None
     dropoff_location: Optional[str] = None
+    is_recurring: Optional[bool] = None
+    recurrence_days: Optional[List[int]] = None
+    recurrence_end_date: Optional[datetime] = None
 
-    @field_validator("departure_time", mode="before")
+    @field_validator("departure_time", "recurrence_end_date", mode="before")
     @classmethod
     def strip_tz(cls, v):
         if v is None:

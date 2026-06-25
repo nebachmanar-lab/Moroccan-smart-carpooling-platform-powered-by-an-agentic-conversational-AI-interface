@@ -107,6 +107,9 @@ async def create_ride(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    if _role != "DRIVER":
+        raise HTTPException(status_code=403, detail="Seuls les conducteurs peuvent publier des trajets.")
     ride_data = ride_in.model_dump()
     _fill_coordinates(ride_in.origin,      "origin_lat",      "origin_lng",      ride_data)
     _fill_coordinates(ride_in.destination, "destination_lat", "destination_lng", ride_data)

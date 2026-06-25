@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -7,7 +7,7 @@ export default function HomePage() {
     const router = useRouter();
 
     function goAI() {
-        const token = localStorage.getItem("access_token");
+        const token = sessionStorage.getItem("access_token");
         if (token) {
             localStorage.setItem("interface_mode", "ai");
             router.push("/agent");
@@ -21,8 +21,7 @@ export default function HomePage() {
             <div className="page-layer">
                 <nav className="navbar">
                     <Link href="/" className="brand">
-                        <span className="brand-badge">CM</span>
-                        <span>Covoit Maroc</span>
+                        <img src="/logo.png" alt="CovoMar" style={{height:"44px",width:"auto"}} onError={(e)=>{(e.target as HTMLImageElement).style.display="none";(e.target as HTMLImageElement).nextElementSibling!.setAttribute("style","display:inline")}} /><span style={{display:"none",fontWeight:900,fontSize:22}}>CovoMar</span>
                     </Link>
 
                     <div className="nav-links">
@@ -50,7 +49,7 @@ export default function HomePage() {
                     <h1 className="hero-title">
                         <span className="gradient-text">Voyagez plus malin</span>
                         <br />
-                        <span className="pink-text">avec Covoit Maroc</span>
+                        <span className="pink-text">avec CovoMar</span>
                     </h1>
 
                     <p className="hero-subtitle">

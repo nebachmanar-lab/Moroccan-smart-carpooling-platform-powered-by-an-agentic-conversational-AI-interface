@@ -53,7 +53,7 @@ export default function PublicTrackingPage() {
         if (shareToken) {
             params.set("share_token", shareToken);
         } else {
-            const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+            const token = typeof window !== "undefined" ? sessionStorage.getItem("access_token") : null;
             if (token) params.set("token", token);
             else { setStatus("error"); return; }
         }
@@ -91,20 +91,19 @@ export default function PublicTrackingPage() {
 
     const statusColor = {
         connecting: "#f59e0b",
-        waiting: "#6366f1",
+        waiting: "var(--blue)",
         live: "#22c55e",
         disconnected: "#ef4444",
         error: "#ef4444",
     }[status];
 
     return (
-        <main style={{ minHeight: "100vh", background: "#0a0a0a", color: "#fff", fontFamily: "system-ui, sans-serif" }}>
-            <nav style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 24px", borderBottom: "1px solid #222" }}>
-                <Link href="/" style={{ color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 18 }}>
-                    <span style={{ background: "#1A56DB", color: "#fff", borderRadius: 6, padding: "2px 8px", marginRight: 6 }}>CM</span>
-                    Covoit Maroc
+        <main style={{ minHeight: "100vh", background: "var(--bg-main)", color: "var(--text-main)", fontFamily: "system-ui, sans-serif" }}>
+            <nav style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 24px", borderBottom: "1px solid var(--border-soft)" }}>
+                <Link href="/" style={{ textDecoration: "none" }}>
+                    <img src="/logo.png" alt="CovoMar" style={{ height: 44, width: "auto" }} />
                 </Link>
-                <span style={{ color: "#666", marginLeft: "auto", fontSize: 13 }}>Suivi de trajet</span>
+                <span style={{ color: "var(--text-muted)", marginLeft: "auto", fontSize: 13 }}>Suivi de trajet</span>
             </nav>
 
             <div style={{ maxWidth: 700, margin: "0 auto", padding: "32px 16px" }}>
@@ -114,7 +113,7 @@ export default function PublicTrackingPage() {
                             {ride.origin} → {ride.destination}
                         </h1>
                         {ride.driver_name && (
-                            <p style={{ color: "#aaa", margin: 0, fontSize: 14 }}>Conducteur : {ride.driver_name}</p>
+                            <p style={{ color: "var(--text-soft)", margin: 0, fontSize: 14 }}>Conducteur : {ride.driver_name}</p>
                         )}
                     </div>
                 )}
@@ -122,17 +121,17 @@ export default function PublicTrackingPage() {
                 <div style={{
                     display: "flex", alignItems: "center", gap: 8,
                     padding: "12px 16px", borderRadius: 10,
-                    background: "#111", border: `1px solid ${statusColor}33`,
+                    background: "var(--bg-card-strong)", border: `1px solid ${statusColor}33`,
                     marginBottom: 20,
                 }}>
                     <span style={{ width: 10, height: 10, borderRadius: "50%", background: statusColor, flexShrink: 0 }} />
                     <span style={{ color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
                     {location?.speed != null && (
-                        <span style={{ color: "#888", fontSize: 13, marginLeft: "auto" }}>{Math.round(location.speed)} km/h</span>
+                        <span style={{ color: "var(--text-muted)", fontSize: 13, marginLeft: "auto" }}>{Math.round(location.speed)} km/h</span>
                     )}
                 </div>
 
-                <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid #222", height: 420 }}>
+                <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid var(--border-soft)", height: 420 }}>
                     {location ? (
                         <LiveMap
                             lat={location.lat}

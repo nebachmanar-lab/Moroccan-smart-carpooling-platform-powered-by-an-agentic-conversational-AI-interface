@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
@@ -333,8 +333,7 @@ function TouristPageInner() {
                 <div className="page-layer">
                     <nav className="navbar">
                         <Link href="/" className="brand">
-                            <span className="brand-badge">CM</span>
-                            <span>Covoit Maroc</span>
+                            <img src="/logo.png" alt="CovoMar" style={{height:"44px",width:"auto"}} onError={(e)=>{(e.target as HTMLImageElement).style.display="none";(e.target as HTMLImageElement).nextElementSibling!.setAttribute("style","display:inline")}} /><span style={{display:"none",fontWeight:900,fontSize:22}}>CovoMar</span>
                         </Link>
                         <div className="nav-links">
                             <Link href="/dashboard">Dashboard</Link>
@@ -413,8 +412,7 @@ function TouristPageInner() {
             <div className="page-layer">
                 <nav className="navbar">
                     <Link href="/" className="brand">
-                        <span className="brand-badge">CM</span>
-                        <span>Covoit Maroc</span>
+                        <img src="/logo.png" alt="CovoMar" style={{height:"44px",width:"auto"}} onError={(e)=>{(e.target as HTMLImageElement).style.display="none";(e.target as HTMLImageElement).nextElementSibling!.setAttribute("style","display:inline")}} /><span style={{display:"none",fontWeight:900,fontSize:22}}>CovoMar</span>
                     </Link>
                     <div className="nav-links">
                         <Link href="/dashboard">Dashboard</Link>
@@ -787,10 +785,10 @@ function TouristPageInner() {
                                     </div>
 
                                     <div className="tourist-guide-grid">
-                                        <GuideSection title="À voir absolument" items={guide.highlights} color="#6366f1" numbered />
-                                        <GuideSection title="Gastronomie"       items={guide.food}       color="#ec4899" />
-                                        <GuideSection title="Où dormir"         items={guide.accommodation} color="#3b82f6" />
-                                        <GuideSection title="Conseils pratiques" items={guide.tips}      color="#10b981" />
+                                        <GuideSection title="À voir absolument" items={guide.highlights} color="var(--blue)" numbered />
+                                        <GuideSection title="Gastronomie"       items={guide.food}       color="var(--pink)" />
+                                        <GuideSection title="Où dormir"         items={guide.accommodation} color="var(--purple)" />
+                                        <GuideSection title="Conseils pratiques" items={guide.tips}      color="var(--green)" />
                                     </div>
 
                                     <div className="tourist-guide-cta">

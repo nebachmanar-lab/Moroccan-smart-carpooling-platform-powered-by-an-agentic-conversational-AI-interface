@@ -129,7 +129,7 @@ export default function RideDetailPage() {
     }
 
     useEffect(() => {
-        const token = localStorage.getItem("access_token");
+        const token = sessionStorage.getItem("access_token");
         if (token) {
             apiFetch("/auth/me")
                 .then((r) => r.ok ? r.json() : null)
@@ -182,8 +182,7 @@ export default function RideDetailPage() {
             <div className="page-layer">
                 <nav className="navbar">
                     <Link href="/" className="brand">
-                        <span className="brand-badge">CM</span>
-                        <span>Covoit Maroc</span>
+                        <img src="/logo.png" alt="CovoMar" style={{height:"44px",width:"auto"}} onError={(e)=>{(e.target as HTMLImageElement).style.display="none";(e.target as HTMLImageElement).nextElementSibling!.setAttribute("style","display:inline")}} /><span style={{display:"none",fontWeight:900,fontSize:22}}>CovoMar</span>
                     </Link>
                     <div className="nav-links">
                         <Link href="/search">Rechercher</Link>

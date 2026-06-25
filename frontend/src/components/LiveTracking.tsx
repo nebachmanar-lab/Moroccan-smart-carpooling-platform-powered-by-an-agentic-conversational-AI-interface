@@ -27,7 +27,7 @@ export default function LiveTracking({ rideId, role, driverName }: Props) {
     const mapRef = useRef<HTMLDivElement>(null);
     const leafletRef = useRef<{ map: L.Map; marker: L.Marker } | null>(null);
 
-    const getToken = () => localStorage.getItem("access_token") || "";
+    const getToken = () => sessionStorage.getItem("access_token") || "";
 
     // Initialize Leaflet map
     useEffect(() => {

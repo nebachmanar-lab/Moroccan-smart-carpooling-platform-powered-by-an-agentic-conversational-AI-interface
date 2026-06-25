@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import Link from "next/link";
@@ -12,6 +12,7 @@ export default function RegisterPage() {
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const [done, setDone] = useState(false);
+    const [autoVerified, setAutoVerified] = useState(false);
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
@@ -26,8 +27,8 @@ export default function RegisterPage() {
                     body: JSON.stringify({ first_name: firstName, last_name: lastName, email, password, role }),
                 }
             );
+            const data = await res.json();
             if (!res.ok) {
-                const data = await res.json();
                 setError(
                     typeof data.detail === "string" ? data.detail
                     : Array.isArray(data.detail) ? data.detail.map((e: { msg: string }) => e.msg).join(", ")
@@ -35,6 +36,7 @@ export default function RegisterPage() {
                 );
                 return;
             }
+            setAutoVerified(data.is_verified === true);
             setDone(true);
         } catch {
             setError("Erreur de connexion. Vérifiez que le serveur est démarré.");
@@ -48,8 +50,7 @@ export default function RegisterPage() {
             <div className="page-layer">
                 <nav className="navbar">
                     <Link href="/" className="brand">
-                        <span className="brand-badge">CM</span>
-                        <span>Covoit Maroc</span>
+                        <img src="/logo.png" alt="CovoMar" style={{height:"44px",width:"auto"}} onError={(e)=>{(e.target as HTMLImageElement).style.display="none";(e.target as HTMLImageElement).nextElementSibling!.setAttribute("style","display:inline")}} /><span style={{display:"none",fontWeight:900,fontSize:22}}>CovoMar</span>
                     </Link>
                     <div className="nav-actions">
                         <Link href="/login" className="btn btn-secondary btn-sm">Se connecter</Link>
@@ -60,11 +61,15 @@ export default function RegisterPage() {
                     <div className="glass-card auth-card">
                         {done ? (
                             <div style={{ textAlign: "center", padding: "16px 0" }}>
-                                <div className="verify-icon">✉</div>
-                                <h2 className="auth-title" style={{ marginTop: 12 }}>Vérifiez votre email</h2>
+                                <div className="verify-icon">{autoVerified ? "✓" : "✉"}</div>
+                                <h2 className="auth-title" style={{ marginTop: 12 }}>
+                                    {autoVerified ? "Compte créé !" : "Vérifiez votre email"}
+                                </h2>
                                 <p className="auth-subtitle" style={{ marginTop: 8 }}>
-                                    Un lien de confirmation a été envoyé à <strong>{email}</strong>.<br />
-                                    Cliquez sur le lien pour activer votre compte.
+                                    {autoVerified
+                                        ? "Votre compte a été activé automatiquement. Vous pouvez vous connecter."
+                                        : <>Un lien de confirmation a été envoyé à <strong>{email}</strong>.<br />Cliquez sur le lien pour activer votre compte.</>
+                                    }
                                 </p>
                                 <Link href="/login" className="btn btn-primary" style={{ marginTop: 24, display: "inline-block" }}>
                                     Aller à la connexion

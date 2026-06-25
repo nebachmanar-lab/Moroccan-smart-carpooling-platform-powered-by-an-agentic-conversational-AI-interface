@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -38,7 +38,7 @@ function SearchContent() {
         if (!origin || !destination) return;
         setAlertSaving(true);
         try {
-            const token = localStorage.getItem("access_token");
+            const token = sessionStorage.getItem("access_token");
             if (!token) { router.push("/login"); return; }
             const res = await fetch(`${apiUrl}/alerts`, {
                 method: "POST",
@@ -86,8 +86,7 @@ function SearchContent() {
             <div className="page-layer">
                 <nav className="navbar">
                     <Link href="/" className="brand">
-                        <span className="brand-badge">CM</span>
-                        <span>Covoit Maroc</span>
+                        <img src="/logo.png" alt="CovoMar" style={{height:"44px",width:"auto"}} onError={(e)=>{(e.target as HTMLImageElement).style.display="none";(e.target as HTMLImageElement).nextElementSibling!.setAttribute("style","display:inline")}} /><span style={{display:"none",fontWeight:900,fontSize:22}}>CovoMar</span>
                     </Link>
                     <div className="nav-links">
                         <Link href="/dashboard">Dashboard</Link>

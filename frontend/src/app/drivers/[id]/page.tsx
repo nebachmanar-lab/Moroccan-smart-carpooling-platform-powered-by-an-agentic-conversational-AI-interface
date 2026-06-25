@@ -56,7 +56,7 @@ export default function DriverProfilePage() {
     const [reportSent, setReportSent] = useState(false);
 
     async function handleReport() {
-        const token = localStorage.getItem("access_token");
+        const token = sessionStorage.getItem("access_token");
         if (!token) { alert("Connectez-vous pour signaler ce conducteur."); return; }
         const reason = prompt("Raison du signalement :");
         if (!reason?.trim()) return;
@@ -145,8 +145,7 @@ export default function DriverProfilePage() {
             <div className="page-layer">
                 <nav className="navbar">
                     <Link href="/" className="brand">
-                        <span className="brand-badge">CM</span>
-                        <span>Covoit Maroc</span>
+                        <img src="/logo.png" alt="CovoMar" style={{height:"44px",width:"auto"}} onError={(e)=>{(e.target as HTMLImageElement).style.display="none";(e.target as HTMLImageElement).nextElementSibling!.setAttribute("style","display:inline")}} /><span style={{display:"none",fontWeight:900,fontSize:22}}>CovoMar</span>
                     </Link>
                     <div className="nav-links">
                         <Link href="/dashboard">Dashboard</Link>
@@ -159,7 +158,7 @@ export default function DriverProfilePage() {
 
                     {/* Driver card */}
                     <div className="glass-card" style={{ padding: "28px", marginBottom: "24px", display: "flex", alignItems: "center", gap: "20px" }}>
-                        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg,#6366f1,#ec4899)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
+                        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg, var(--blue), var(--pink))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
                             {fullName[0]?.toUpperCase() ?? "?"}
                         </div>
                         <div style={{ flex: 1 }}>

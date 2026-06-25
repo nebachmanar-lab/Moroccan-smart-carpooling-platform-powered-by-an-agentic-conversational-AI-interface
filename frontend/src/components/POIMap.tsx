@@ -17,7 +17,7 @@ interface Props {
 
 const centerIcon = new L.DivIcon({
     className: "",
-    html: `<div style="width:16px;height:16px;border-radius:50%;background:#ec4899;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>`,
+    html: `<div style="width:16px;height:16px;border-radius:50%;background:#C2410C;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>`,
     iconSize: [16, 16],
     iconAnchor: [8, 8],
 });

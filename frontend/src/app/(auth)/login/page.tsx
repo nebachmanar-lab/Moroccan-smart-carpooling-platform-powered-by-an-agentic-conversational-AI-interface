@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -44,9 +44,9 @@ function LoginContent() {
             }
 
             const data = await res.json();
-            localStorage.setItem("access_token", data.access_token);
-            localStorage.setItem("refresh_token", data.refresh_token);
-            localStorage.setItem("token_type", data.token_type || "bearer");
+            sessionStorage.setItem("access_token", data.access_token);
+            sessionStorage.setItem("refresh_token", data.refresh_token);
+            sessionStorage.setItem("token_type", data.token_type || "bearer");
             router.push("/dashboard");
         } catch {
             setError("Erreur de connexion. Vérifiez que le serveur backend est démarré.");
@@ -75,8 +75,7 @@ function LoginContent() {
             <div className="page-layer">
                 <nav className="navbar">
                     <Link href="/" className="brand">
-                        <span className="brand-badge">CM</span>
-                        <span>Covoit Maroc</span>
+                        <img src="/logo.png" alt="CovoMar" style={{height:"44px",width:"auto"}} onError={(e)=>{(e.target as HTMLImageElement).style.display="none";(e.target as HTMLImageElement).nextElementSibling!.setAttribute("style","display:inline")}} /><span style={{display:"none",fontWeight:900,fontSize:22}}>CovoMar</span>
                     </Link>
                     <div className="nav-actions">
                         <Link href="/register" className="btn btn-secondary btn-sm">Créer un compte</Link>

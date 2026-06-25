@@ -78,6 +78,14 @@ async def register(
         if phone_taken.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Numéro de téléphone déjà utilisé.")
 
+    # Auto-verify when SMTP is not properly configured (dev / no email setup)
+    _smtp_configured = bool(
+        settings.SMTP_USER
+        and settings.SMTP_USER != "your@gmail.com"
+        and settings.SMTP_PASSWORD
+        and settings.SMTP_PASSWORD != "your_app_password"
+    )
+
     user = User(
         id=str(uuid.uuid4()),
         first_name=user_in.first_name,
@@ -86,21 +94,22 @@ async def register(
         phone=user_in.phone or None,
         password_hash=await hash_password_async(user_in.password),
         role=user_in.role,
-        is_verified=False,
+        is_verified=not _smtp_configured,  # auto-verify when email not configured
         is_phone_verified=False,
     )
     db.add(user)
     await db.commit()
 
-    # Email verification
-    token = create_one_time_token(user.id, "verify_email", expire_hours=24)
-    verify_url = f"{settings.FRONTEND_URL}/auth/verify-email?token={token}"
-    background_tasks.add_task(
-        send_verification_email,
-        to_email=user.email,
-        name=user.first_name,
-        verify_url=verify_url,
-    )
+    # Email verification (only when SMTP is properly configured)
+    if _smtp_configured:
+        token = create_one_time_token(user.id, "verify_email", expire_hours=24)
+        verify_url = f"{settings.FRONTEND_URL}/verify-email?token={token}"
+        background_tasks.add_task(
+            send_verification_email,
+            to_email=user.email,
+            name=user.first_name,
+            verify_url=verify_url,
+        )
 
     # Phone OTP — triggered only when a phone number is provided
     if user_in.phone:
@@ -201,7 +210,7 @@ async def resend_verification(
     # Always return 200 to avoid email enumeration
     if user and not user.is_verified:
         token = create_one_time_token(user.id, "verify_email", expire_hours=24)
-        verify_url = f"{settings.FRONTEND_URL}/auth/verify-email?token={token}"
+        verify_url = f"{settings.FRONTEND_URL}/verify-email?token={token}"
         background_tasks.add_task(
             send_verification_email,
             to_email=user.email,
@@ -223,7 +232,17 @@ async def login(
         raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect.")
 
     if not user.is_verified:
-        raise HTTPException(status_code=403, detail="email_not_verified")
+        _smtp_ok = bool(
+            settings.SMTP_USER
+            and settings.SMTP_USER != "your@gmail.com"
+            and settings.SMTP_PASSWORD
+            and settings.SMTP_PASSWORD != "your_app_password"
+        )
+        if _smtp_ok:
+            raise HTTPException(status_code=403, detail="email_not_verified")
+        # SMTP not configured — auto-verify on first login
+        user.is_verified = True
+        await db.commit()
 
     role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
     token = create_access_token(user_id=str(user.id), role=role_value)
@@ -242,7 +261,7 @@ async def forgot_password(
     user = result.scalar_one_or_none()
     if user:
         token = create_one_time_token(user.id, "reset_password", expire_hours=1)
-        reset_url = f"{settings.FRONTEND_URL}/auth/reset-password?token={token}"
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
         background_tasks.add_task(
             send_reset_password_email,
             to_email=user.email,

@@ -22,6 +22,7 @@ from ..models.passenger_rating import PassengerRating
 from ..models.alert import RideAlert
 from ..models.report import Report
 from ..models.user import User, Role
+from ..models.document import DriverDocument
 from ..data.moroccan_cities import MOROCCAN_CITIES
 
 
@@ -279,12 +280,13 @@ async def get_user_preferences(db: AsyncSession, user: User) -> dict:
         return {"found": False, "message": "Aucune préférence enregistrée pour ce compte."}
     return {
         "found": True,
-        "smoking_allowed": prefs.smoking_allowed,
-        "pets_allowed": prefs.pets_allowed,
-        "music_allowed": prefs.music_allowed,
-        "talking_preference": prefs.talking_preference,
-        "luggage_size": prefs.luggage_size,
-        "air_conditioning": prefs.air_conditioning,
+        "smoking": prefs.smoking_allowed,
+        "pets": prefs.pets_allowed,
+        "music": prefs.music_allowed,
+        "ac": prefs.air_conditioning,
+        "talk": prefs.talking_preference,
+        "luggage": prefs.luggage_size,
+        "note": prefs.custom_note,
     }
 
 
@@ -424,7 +426,7 @@ async def prepare_cancel_ride(db: AsyncSession, ride_id: str, user: User) -> dic
 # Tool: update_preferences  (direct write — non-destructive, no confirmation)
 # ---------------------------------------------------------------------------
 
-async def update_preferences(
+async def prepare_update_preferences(
     db: AsyncSession,
     user: User,
     smoking_allowed: bool | None = None,
@@ -434,25 +436,39 @@ async def update_preferences(
     talking_preference: str | None = None,
     luggage_size: str | None = None,
 ) -> dict:
+    """Build a confirmation summary. The actual DB write happens after user confirms."""
     role = user.role.value if hasattr(user.role, "value") else str(user.role)
     if role.upper() != "DRIVER":
-        return {"success": False, "error": "Seuls les conducteurs peuvent définir des préférences."}
+        return {"error": "Seuls les conducteurs peuvent définir des préférences."}
 
+    updates: dict = {}
+    if smoking_allowed is not None:    updates["smoking_allowed"]    = smoking_allowed
+    if pets_allowed is not None:       updates["pets_allowed"]       = pets_allowed
+    if music_allowed is not None:      updates["music_allowed"]      = music_allowed
+    if air_conditioning is not None:   updates["air_conditioning"]   = air_conditioning
+    if talking_preference is not None: updates["talking_preference"] = talking_preference
+    if luggage_size is not None:       updates["luggage_size"]       = luggage_size
+
+    if not updates:
+        return {"error": "Aucune préférence fournie à mettre à jour."}
+
+    return {
+        "confirm_required": True,
+        "action": "update_preferences",
+        "summary": updates,
+    }
+
+
+async def execute_update_preferences(
+    db: AsyncSession,
+    user: User,
+    updates: dict,
+) -> dict:
+    """Actually write preferences to DB. Called only from the confirmed path."""
     result = await db.execute(
         select(DriverPreferences).where(DriverPreferences.driver_id == user.id)
     )
     prefs = result.scalar_one_or_none()
-
-    updates: dict = {}
-    if smoking_allowed is not None:   updates["smoking_allowed"]    = smoking_allowed
-    if pets_allowed is not None:      updates["pets_allowed"]       = pets_allowed
-    if music_allowed is not None:     updates["music_allowed"]      = music_allowed
-    if air_conditioning is not None:  updates["air_conditioning"]   = air_conditioning
-    if talking_preference is not None: updates["talking_preference"] = talking_preference
-    if luggage_size is not None:      updates["luggage_size"]       = luggage_size
-
-    if not updates:
-        return {"success": False, "error": "Aucune préférence fournie à mettre à jour."}
 
     if prefs:
         for k, v in updates.items():
@@ -465,15 +481,46 @@ async def update_preferences(
     await db.commit()
     await db.refresh(prefs)
     return {
-        "success": True,
-        "preferences": {
-            "smoking_allowed": prefs.smoking_allowed,
-            "pets_allowed": prefs.pets_allowed,
-            "music_allowed": prefs.music_allowed,
-            "air_conditioning": prefs.air_conditioning,
-            "talking_preference": prefs.talking_preference,
-            "luggage_size": prefs.luggage_size,
-        },
+        "smoking": prefs.smoking_allowed,
+        "pets": prefs.pets_allowed,
+        "music": prefs.music_allowed,
+        "ac": prefs.air_conditioning,
+        "talk": prefs.talking_preference,
+        "luggage": prefs.luggage_size,
+        "note": prefs.custom_note,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: save_custom_note  (driver personal preferences note)
+# ---------------------------------------------------------------------------
+
+async def save_custom_note(db: AsyncSession, user: User, note: str) -> dict:
+    result = await db.execute(
+        select(DriverPreferences).where(DriverPreferences.driver_id == user.id)
+    )
+    prefs = result.scalar_one_or_none()
+    if prefs:
+        prefs.custom_note = note
+    else:
+        import uuid as _uuid
+        prefs = DriverPreferences(
+            id=str(_uuid.uuid4()),
+            driver_id=user.id,
+            custom_note=note,
+        )
+        db.add(prefs)
+    await db.commit()
+    await db.refresh(prefs)
+    return {
+        "found": True,
+        "smoking": prefs.smoking_allowed,
+        "pets": prefs.pets_allowed,
+        "music": prefs.music_allowed,
+        "ac": prefs.air_conditioning,
+        "talk": prefs.talking_preference,
+        "luggage": prefs.luggage_size,
+        "note": prefs.custom_note,
     }
 
 
@@ -490,6 +537,7 @@ async def get_my_rides(db: AsyncSession, user: User) -> dict:
     )
     result = await db.execute(stmt)
     rides = result.scalars().all()
+    day_names = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
     return {
         "rides": [
             {
@@ -500,10 +548,41 @@ async def get_my_rides(db: AsyncSession, user: User) -> dict:
                 "available_seats": r.available_seats,
                 "price_per_seat": r.price_per_seat,
                 "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+                "is_recurring": r.is_recurring,
+                "recurrence_days": (
+                    [day_names[d] for d in r.recurrence_days if 0 <= d <= 6]
+                    if r.recurrence_days else []
+                ),
+                "recurrence_end_date": r.recurrence_end_date.isoformat() if r.recurrence_end_date else None,
             }
             for r in rides
         ],
         "count": len(rides),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: prepare_set_recurring  (safe — no DB write; triggers day-picker UI)
+# ---------------------------------------------------------------------------
+
+async def prepare_set_recurring(db: AsyncSession, user: User, ride_id: str) -> dict:
+    """Return ride info so the frontend shows a day-of-week picker card."""
+    result = await db.execute(select(Ride).where(Ride.id == ride_id, Ride.driver_id == user.id))
+    ride = result.scalar_one_or_none()
+    if not ride:
+        return {"error": "Trajet introuvable ou vous n'êtes pas le conducteur."}
+    day_names = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+    return {
+        "ride_id": ride.id,
+        "origin": ride.origin,
+        "destination": ride.destination,
+        "departure_time": ride.departure_time.isoformat(),
+        "is_recurring": ride.is_recurring,
+        "recurrence_days": (
+            [day_names[d] for d in ride.recurrence_days if 0 <= d <= 6]
+            if ride.recurrence_days else []
+        ),
+        "recurrence_end_date": ride.recurrence_end_date.isoformat() if ride.recurrence_end_date else None,
     }
 
 
@@ -967,6 +1046,217 @@ async def get_tracking_share_link(db: AsyncSession, user: User, ride_id: str) ->
 
 
 # ---------------------------------------------------------------------------
+# Tool: get_ride_passengers
+# ---------------------------------------------------------------------------
+
+async def get_ride_passengers(db: AsyncSession, ride_id: str, user: User) -> dict:
+    """Returns passengers with confirmed/pending bookings for a driver's ride."""
+    ride_res = await db.execute(select(Ride).where(Ride.id == ride_id, Ride.driver_id == user.id))
+    ride = ride_res.scalar_one_or_none()
+    if not ride:
+        return {"error": "Trajet introuvable ou vous n'en êtes pas le conducteur."}
+    stmt = (
+        select(Booking)
+        .options(joinedload(Booking.passenger))
+        .where(Booking.ride_id == ride_id, Booking.status != BookingStatus.CANCELLED)
+        .order_by(Booking.created_at)
+    )
+    result = await db.execute(stmt)
+    bookings = result.scalars().unique().all()
+    return {
+        "ride_id": ride_id,
+        "origin": ride.origin,
+        "destination": ride.destination,
+        "departure_time": ride.departure_time.isoformat(),
+        "passengers": [
+            {
+                "booking_id": b.id,
+                "passenger_id": b.passenger_id,
+                "passenger_name": f"{b.passenger.first_name} {b.passenger.last_name}" if b.passenger else "N/A",
+                "seats": b.seats_booked,
+                "total_price": b.total_price,
+                "status": b.status.value if hasattr(b.status, "value") else str(b.status),
+            }
+            for b in bookings
+        ],
+        "count": len(bookings),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: prepare_accept_booking
+# ---------------------------------------------------------------------------
+
+async def prepare_accept_booking(db: AsyncSession, booking_id: str, user: User) -> dict:
+    b_res = await db.execute(
+        select(Booking).options(joinedload(Booking.ride), joinedload(Booking.passenger))
+        .where(Booking.id == booking_id)
+    )
+    booking = b_res.scalar_one_or_none()
+    if not booking:
+        return {"confirm_required": False, "error": "Réservation introuvable."}
+    if not booking.ride or booking.ride.driver_id != user.id:
+        return {"confirm_required": False, "error": "Cette réservation n'appartient pas à un de vos trajets."}
+    if booking.status != BookingStatus.PENDING:
+        return {"confirm_required": False, "error": f"Réservation déjà en statut : {booking.status.value}."}
+    passenger_name = f"{booking.passenger.first_name} {booking.passenger.last_name}" if booking.passenger else "N/A"
+    return {
+        "confirm_required": True,
+        "action": "accept_booking",
+        "summary": {
+            "booking_id": booking_id,
+            "passenger_name": passenger_name,
+            "seats": booking.seats_booked,
+            "total_price": booking.total_price,
+            "origin": booking.ride.origin,
+            "destination": booking.ride.destination,
+            "departure_time": booking.ride.departure_time.isoformat(),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: prepare_refuse_booking
+# ---------------------------------------------------------------------------
+
+async def prepare_refuse_booking(db: AsyncSession, booking_id: str, user: User) -> dict:
+    b_res = await db.execute(
+        select(Booking).options(joinedload(Booking.ride), joinedload(Booking.passenger))
+        .where(Booking.id == booking_id)
+    )
+    booking = b_res.scalar_one_or_none()
+    if not booking:
+        return {"confirm_required": False, "error": "Réservation introuvable."}
+    if not booking.ride or booking.ride.driver_id != user.id:
+        return {"confirm_required": False, "error": "Cette réservation n'appartient pas à un de vos trajets."}
+    if booking.status == BookingStatus.CANCELLED:
+        return {"confirm_required": False, "error": "Réservation déjà annulée."}
+    passenger_name = f"{booking.passenger.first_name} {booking.passenger.last_name}" if booking.passenger else "N/A"
+    return {
+        "confirm_required": True,
+        "action": "refuse_booking",
+        "summary": {
+            "booking_id": booking_id,
+            "passenger_name": passenger_name,
+            "seats": booking.seats_booked,
+            "origin": booking.ride.origin,
+            "destination": booking.ride.destination,
+            "departure_time": booking.ride.departure_time.isoformat(),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: prepare_send_message_to_passenger
+# ---------------------------------------------------------------------------
+
+async def prepare_send_message_to_passenger(db: AsyncSession, booking_id: str, content: str, user: User) -> dict:
+    """Driver sends message to a passenger via booking."""
+    b_res = await db.execute(
+        select(Booking).options(joinedload(Booking.ride), joinedload(Booking.passenger))
+        .where(Booking.id == booking_id)
+    )
+    booking = b_res.scalar_one_or_none()
+    if not booking:
+        return {"confirm_required": False, "error": "Réservation introuvable."}
+    if not booking.ride or booking.ride.driver_id != user.id:
+        return {"confirm_required": False, "error": "Accès non autorisé."}
+    passenger_name = f"{booking.passenger.first_name} {booking.passenger.last_name}" if booking.passenger else "le passager"
+    return {
+        "confirm_required": True,
+        "action": "send_message_to_passenger",
+        "summary": {
+            "booking_id": booking_id,
+            "content": content,
+            "passenger_name": passenger_name,
+            "origin": booking.ride.origin if booking.ride else None,
+            "destination": booking.ride.destination if booking.ride else None,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_driver_revenue_summary
+# ---------------------------------------------------------------------------
+
+async def get_driver_revenue_summary(db: AsyncSession, user: User) -> dict:
+    rides_res = await db.execute(
+        select(Ride).where(Ride.driver_id == user.id)
+    )
+    rides = rides_res.scalars().all()
+    total_rides = len(rides)
+    active_rides = sum(1 for r in rides if (r.status.value if hasattr(r.status, "value") else str(r.status)) == "ACTIVE")
+    completed_rides = sum(1 for r in rides if (r.status.value if hasattr(r.status, "value") else str(r.status)) == "COMPLETED")
+    cancelled_rides = sum(1 for r in rides if (r.status.value if hasattr(r.status, "value") else str(r.status)) == "CANCELLED")
+
+    ride_ids = [r.id for r in rides]
+    confirmed_bookings = []
+    if ride_ids:
+        b_res = await db.execute(
+            select(Booking).where(
+                Booking.ride_id.in_(ride_ids),
+                Booking.status == BookingStatus.CONFIRMED,
+            )
+        )
+        confirmed_bookings = b_res.scalars().all()
+
+    estimated_revenue = sum(b.total_price for b in confirmed_bookings)
+    return {
+        "total_rides": total_rides,
+        "active_rides": active_rides,
+        "completed_rides": completed_rides,
+        "cancelled_rides": cancelled_rides,
+        "confirmed_bookings": len(confirmed_bookings),
+        "estimated_revenue_mad": round(estimated_revenue, 2),
+        "note": "Revenus estimés basés sur les réservations confirmées. Le paiement se fait en espèces.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_my_driver_documents
+# ---------------------------------------------------------------------------
+
+async def get_my_driver_documents(db: AsyncSession, user: User) -> dict:
+    from ..models.document import DriverDocument
+    res = await db.execute(
+        select(DriverDocument).where(DriverDocument.driver_id == user.id)
+        .order_by(DriverDocument.created_at.desc())
+    )
+    docs = res.scalars().all()
+
+    doc_list = [
+        {
+            "id": d.id,
+            "type": d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type),
+            "status": d.status.value if hasattr(d.status, "value") else str(d.status),
+            "uploaded_at": d.created_at.isoformat() if d.created_at else None,
+            "notes": d.admin_note,
+        }
+        for d in docs
+    ]
+
+    # A driver is truly verified only when at least one document is APPROVED by admin
+    has_approved = any(d["status"] == "APPROVED" for d in doc_list)
+    has_pending  = any(d["status"] == "PENDING"  for d in doc_list)
+
+    if has_approved:
+        message = "Documents validés par l'admin. Compte conducteur vérifié."
+    elif has_pending:
+        message = "Documents soumis, en attente de validation par l'admin."
+    elif doc_list:
+        message = "Vos documents ont été refusés. Veuillez les soumettre à nouveau."
+    else:
+        message = "Aucun document soumis. Uploadez votre CIN et votre permis de conduire pour faire valider votre profil conducteur."
+
+    return {
+        "verified": has_approved,
+        "documents": doc_list,
+        "count": len(doc_list),
+        "message": message,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tool schema definitions (OpenAI / Groq format)
 # ---------------------------------------------------------------------------
 
@@ -1111,25 +1401,6 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "update_preferences",
-            "description": "Update the DRIVER's ride preferences (smoking, pets, music, AC, talking style, luggage). Only provide the fields the user wants to change. Takes effect immediately without confirmation.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "smoking_allowed":    {"type": "boolean", "description": "Whether smoking is allowed in the car"},
-                    "pets_allowed":       {"type": "boolean", "description": "Whether pets are allowed"},
-                    "music_allowed":      {"type": "boolean", "description": "Whether music is played"},
-                    "air_conditioning":   {"type": "boolean", "description": "Whether AC is available"},
-                    "talking_preference": {"type": "string",  "enum": ["silent", "no_preference", "talkative"], "description": "Preferred conversation level"},
-                    "luggage_size":       {"type": "string",  "enum": ["small", "medium", "large"], "description": "Maximum luggage size accepted"},
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "get_my_rides",
             "description": (
                 "Get the list of rides published by the current DRIVER. "
@@ -1169,8 +1440,45 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_user_preferences",
-            "description": "Get the current user's ride preferences (smoking, music, AC, etc.).",
+            "description": "Get the current DRIVER's ride preferences (smoking, music, AC, etc.) and display the interactive preferences card.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_custom_note",
+            "description": (
+                "Save the DRIVER's personal preferences text note. "
+                "Use this when the driver describes personal rules or preferences in natural language, "
+                "e.g. 'je préfère les passagers ponctuels', 'pas de nourriture dans la voiture', "
+                "'je m'arrête pour pause si trajet > 2h'. Extract the full text and save it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "note": {"type": "string", "description": "The personal preferences text to save, written in the driver's own words."},
+                },
+                "required": ["note"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_set_recurring",
+            "description": (
+                "Show a day-of-week picker so the driver can mark one of their rides as recurring (trajet habituel). "
+                "Call this when the driver wants to set which days a ride repeats. "
+                "Requires the ride_id of the specific ride. Get it from get_my_rides first if unknown."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ride_id": {"type": "string", "description": "The ID of the ride to mark as recurring."},
+                },
+                "required": ["ride_id"],
+            },
         },
     },
     {
@@ -1329,6 +1637,80 @@ TOOL_DEFINITIONS = [
                 },
                 "required": ["ride_id"],
             },
+        },
+    },
+    # ── DRIVER-ONLY TOOLS ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_ride_passengers",
+            "description": "Get the list of passengers (confirmed and pending) for a specific ride owned by the driver.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ride_id": {"type": "string", "description": "The ride UUID"},
+                },
+                "required": ["ride_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_accept_booking",
+            "description": "Prepare acceptance of a passenger booking. Shows confirmation before executing. Use when driver wants to accept a PENDING booking.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "booking_id": {"type": "string", "description": "The booking UUID to accept"},
+                },
+                "required": ["booking_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_refuse_booking",
+            "description": "Prepare refusal of a passenger booking. Shows confirmation before executing. Use when driver wants to refuse/reject a booking.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "booking_id": {"type": "string", "description": "The booking UUID to refuse"},
+                },
+                "required": ["booking_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_send_message_to_passenger",
+            "description": "Prepare a message from driver to a passenger linked to a booking. Requires confirmation before sending.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "booking_id": {"type": "string", "description": "Booking UUID linking driver and passenger"},
+                    "content": {"type": "string", "description": "Message content"},
+                },
+                "required": ["booking_id", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_driver_revenue_summary",
+            "description": "Get driver's revenue statistics: total rides, confirmed bookings, estimated revenue in MAD.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_my_driver_documents",
+            "description": "Get driver's uploaded documents (CIN, permis) and verification status.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
 ]

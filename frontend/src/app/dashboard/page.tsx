@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -242,7 +242,7 @@ export default function DashboardPage() {
     }, []);
 
     useEffect(() => {
-        const token = localStorage.getItem("access_token");
+        const token = sessionStorage.getItem("access_token");
         if (!token) { router.push("/login"); return; }
 
         const pollUnread = async () => {
@@ -321,9 +321,9 @@ export default function DashboardPage() {
     }, [driverTab, driverBookingsLoaded, loadDriverBookings, revenue, revenueLoading]);
 
     function logout() {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        localStorage.removeItem("token_type");
+        sessionStorage.removeItem("access_token");
+        sessionStorage.removeItem("refresh_token");
+        sessionStorage.removeItem("token_type");
         sessionStorage.removeItem("dashboard_user");
         router.push("/login");
     }
@@ -417,8 +417,8 @@ export default function DashboardPage() {
         if (navigator.share) {
             try {
                 await navigator.share({
-                    title: "Ma position — Covoit Maroc",
-                    text: "Ma position en temps réel (Covoit Maroc)",
+                    title: "Ma position — CovoMar",
+                    text: "Ma position en temps réel (CovoMar)",
                     url,
                 });
                 return;
@@ -437,7 +437,7 @@ export default function DashboardPage() {
 
     function copyShareLink() {
         if (!shareUrl) return;
-        navigator.clipboard.writeText(`Ma position (Covoit Maroc) : ${shareUrl}`);
+        navigator.clipboard.writeText(`Ma position (CovoMar) : ${shareUrl}`);
         setLocationCopied(true);
         setTimeout(() => setLocationCopied(false), 2500);
     }
@@ -531,7 +531,7 @@ export default function DashboardPage() {
             const form = new FormData();
             form.append("file", file);
             form.append("doc_type", docType);
-            const token = localStorage.getItem("access_token");
+            const token = sessionStorage.getItem("access_token");
             const res = await fetch(`${apiUrl}/documents`, {
                 method: "POST",
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -638,8 +638,7 @@ export default function DashboardPage() {
             <div className="page-layer">
                 <nav className="navbar">
                     <Link href="/" className="brand">
-                        <span className="brand-badge">CM</span>
-                        <span>Covoit Maroc</span>
+                        <img src="/logo.png" alt="CovoMar" style={{height:"44px",width:"auto"}} onError={(e)=>{(e.target as HTMLImageElement).style.display="none";(e.target as HTMLImageElement).nextElementSibling!.setAttribute("style","display:inline")}} /><span style={{display:"none",fontWeight:900,fontSize:22}}>CovoMar</span>
                     </Link>
                     <div className="nav-links">
                         <Link href="/dashboard">Dashboard</Link>
@@ -801,7 +800,7 @@ export default function DashboardPage() {
                                         <div className="share-menu">
                                             <p className="share-menu-title">Partager via</p>
                                             <a
-                                                href={`https://wa.me/?text=${encodeURIComponent("Ma position (Covoit Maroc) : " + shareUrl)}`}
+                                                href={`https://wa.me/?text=${encodeURIComponent("Ma position (CovoMar) : " + shareUrl)}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="share-option"
@@ -810,14 +809,14 @@ export default function DashboardPage() {
                                                 <span className="share-option-icon">WhatsApp</span>
                                             </a>
                                             <a
-                                                href={`mailto:?subject=Ma position&body=${encodeURIComponent("Ma position en temps réel (Covoit Maroc) : " + shareUrl)}`}
+                                                href={`mailto:?subject=Ma position&body=${encodeURIComponent("Ma position en temps réel (CovoMar) : " + shareUrl)}`}
                                                 className="share-option"
                                                 onClick={() => setShareMenuOpen(false)}
                                             >
                                                 <span className="share-option-icon">Email</span>
                                             </a>
                                             <a
-                                                href={`https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent("Ma position (Covoit Maroc)")}`}
+                                                href={`https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent("Ma position (CovoMar)")}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="share-option"
@@ -1366,7 +1365,16 @@ export default function DashboardPage() {
                         </>
                     )}
 
-                    {!isDriver && !isPassenger && (
+                    {!isDriver && !isPassenger && isAdmin && (
+                        <section className="glass-card section-card" style={{ textAlign: "center", padding: "40px 24px" }}>
+                            <h2 style={{ marginBottom: 12 }}>Tableau de bord administrateur</h2>
+                            <p className="dashboard-subtitle" style={{ marginBottom: 24 }}>Vous êtes connecté en tant qu&apos;administrateur. Accédez au panneau de contrôle complet.</p>
+                            <a href="/admin" style={{ display: "inline-block", padding: "10px 28px", background: "#ff6a1a", color: "#fff", borderRadius: 10, fontWeight: 700, fontSize: 14, textDecoration: "none" }}>
+                                Ouvrir le dashboard Admin
+                            </a>
+                        </section>
+                    )}
+                    {!isDriver && !isPassenger && !isAdmin && (
                         <section className="glass-card section-card">
                             <h2>Rôle inconnu</h2>
                             <p className="dashboard-subtitle">Rôle actuel : {user.role}</p>
@@ -1867,7 +1875,7 @@ function HabitualsAlertsSection({
     const [deleting, setDeleting] = useState<string | null>(null);
 
     useEffect(() => {
-        const token = localStorage.getItem("access_token");
+        const token = sessionStorage.getItem("access_token");
         if (!token) return;
         fetch(`${apiUrl}/alerts/me`, { headers: { Authorization: `Bearer ${token}` } })
             .then((r) => r.ok ? r.json() : [])
@@ -1883,7 +1891,7 @@ function HabitualsAlertsSection({
 
     async function enableAlert(origin: string, destination: string) {
         const key = `${origin}-${destination}`;
-        const token = localStorage.getItem("access_token");
+        const token = sessionStorage.getItem("access_token");
         if (!token) return;
         setSaving(key);
         try {
@@ -1905,7 +1913,7 @@ function HabitualsAlertsSection({
     }
 
     async function disableAlert(id: string) {
-        const token = localStorage.getItem("access_token");
+        const token = sessionStorage.getItem("access_token");
         if (!token) return;
         setDeleting(id);
         await fetch(`${apiUrl}/alerts/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });

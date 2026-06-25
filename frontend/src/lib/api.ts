@@ -1,7 +1,21 @@
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8001";
 
+// Use sessionStorage so each browser tab has its own independent session.
+// This prevents multiple open windows from overwriting each other's tokens.
+const store = typeof window !== "undefined" ? window.sessionStorage : null;
+const getToken = (key: string) => store?.getItem(key) ?? null;
+const setToken = (key: string, val: string) => store?.setItem(key, val);
+const clearTokens = () => { store?.removeItem("access_token"); store?.removeItem("refresh_token"); store?.removeItem("token_type"); };
+
+function networkErrorResponse() {
+    return new Response(JSON.stringify({ detail: "Service temporairement indisponible." }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+    });
+}
+
 async function tryRefresh(): Promise<string | null> {
-    const refreshToken = localStorage.getItem("refresh_token");
+    const refreshToken = getToken("refresh_token");
     if (!refreshToken) return null;
 
     try {
@@ -12,8 +26,8 @@ async function tryRefresh(): Promise<string | null> {
         });
         if (!res.ok) return null;
         const data = await res.json();
-        localStorage.setItem("access_token", data.access_token);
-        localStorage.setItem("refresh_token", data.refresh_token);
+        setToken("access_token", data.access_token);
+        setToken("refresh_token", data.refresh_token);
         return data.access_token;
     } catch {
         return null;
@@ -21,22 +35,30 @@ async function tryRefresh(): Promise<string | null> {
 }
 
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-    const token = localStorage.getItem("access_token");
+    const token = getToken("access_token");
     const headers = new Headers(init.headers);
     if (token) headers.set("Authorization", `Bearer ${token}`);
 
-    let res = await fetch(`${API}${path}`, { ...init, headers });
+    let res: Response;
+    try {
+        res = await fetch(`${API}${path}`, { ...init, headers });
+    } catch {
+        return networkErrorResponse();
+    }
 
     if (res.status === 401) {
         const newToken = await tryRefresh();
         if (newToken) {
             headers.set("Authorization", `Bearer ${newToken}`);
-            res = await fetch(`${API}${path}`, { ...init, headers });
+            try {
+                res = await fetch(`${API}${path}`, { ...init, headers });
+            } catch {
+                return networkErrorResponse();
+            }
         } else {
-            localStorage.removeItem("access_token");
-            localStorage.removeItem("refresh_token");
-            localStorage.removeItem("token_type");
+            clearTokens();
             window.location.href = "/login";
+            return new Response(null, { status: 401 });
         }
     }
 

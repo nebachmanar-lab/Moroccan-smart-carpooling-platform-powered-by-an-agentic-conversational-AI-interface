@@ -1,5 +1,5 @@
 export const CATEGORY_STYLE: Record<string, { color: string; label: string }> = {
-    poi:           { color: "#6366f1", label: "Site / Monument" },
+    poi:           { color: "#C2410C", label: "Site / Monument" },
     restaurant:    { color: "#f59e0b", label: "Restaurant / Café" },
     accommodation: { color: "#3b82f6", label: "Hébergement" },
 };
